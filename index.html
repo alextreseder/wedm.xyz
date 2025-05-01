@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wire EDM CAM Tool</title>
+  <style>
+    body { margin: 0; overflow: hidden; background-color: #333d4a; color: #ffffff; font-family: Arial, sans-serif; }
+    #app { display: flex; height: 100vh; }
+    #sidebar { width: 250px; background-color: #2a3440; padding: 20px; box-sizing: border-box; border-right: 1px solid #444; }
+    #main { flex: 1; position: relative; }
+    #renderContainer { width: 100%; height: 100%; }
+    #stlInput { margin-bottom: 20px; padding: 8px; background-color: #444; border: 1px solid #00b4ff; color: #ffffff; cursor: pointer; }
+    #stlInput::-webkit-file-upload-button { background-color: #00b4ff; color: #ffffff; border: none; padding: 6px 12px; cursor: pointer; }
+    #stlInput::-webkit-file-upload-button:hover { background-color: #0099d6; }
+    button { background-color: #00b4ff; color: #ffffff; border: none; padding: 8px 16px; cursor: pointer; margin: 5px 0; display: block; width: 100%; }
+    button:hover { background-color: #0099d6; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="sidebar">
+      <input type="file" id="stlInput" accept=".stl" />
+      <button id="selectTopFaceBtn">Select Top Face</button>
+      <button id="rotateBtn">Rotate to Worktable</button>
+      <button id="selectLeadInBtn">Select Lead-In</button>
+      <button id="selectLeadOutBtn">Select Lead-Out</button>
+      <button id="selectPathBtn">Select Path</button> <!-- New button -->
+    </div>
+    <div id="main">
+      <div id="renderContainer"></div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
