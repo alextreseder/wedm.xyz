@@ -5,27 +5,113 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wire EDM CAM Tool</title>
   <style>
-    body { margin: 0; overflow: hidden; background-color: #333d4a; color: #ffffff; font-family: Arial, sans-serif; }
-    #app { display: flex; height: 100vh; }
-    #sidebar { width: 250px; background-color: #2a3440; padding: 20px; box-sizing: border-box; border-right: 1px solid #444; }
-    #main { flex: 1; position: relative; }
+    body { margin: 0; overflow: hidden; background-color: #222936; color: #ffffff; font-family: Arial, sans-serif; }
+    #app { display: flex; height: 100vh; padding: 10px; box-sizing: border-box; }
+    #sidebar { 
+      width: 25%; 
+      background-color: #2a3440; 
+      padding: 20px; 
+      box-sizing: border-box; 
+      border: 3px solid #868d9e; 
+      border-radius: 8px;
+      margin-right: 10px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar-top {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar-bottom {
+      flex: 1;
+      margin-top: 20px;
+    }
+    #topView {
+      width: 100%;
+      height: 100%;
+      background-color: #000000;
+      border: 2px solid #868d9e;
+      border-radius: 8px;
+    }
+    #main { 
+      flex: 1; 
+      position: relative;
+      border-radius: 8px;
+      overflow: hidden;
+    }
     #renderContainer { width: 100%; height: 100%; }
     #stlInput { margin-bottom: 20px; padding: 8px; background-color: #444; border: 1px solid #00b4ff; color: #ffffff; cursor: pointer; }
     #stlInput::-webkit-file-upload-button { background-color: #00b4ff; color: #ffffff; border: none; padding: 6px 12px; cursor: pointer; }
     #stlInput::-webkit-file-upload-button:hover { background-color: #0099d6; }
-    button { background-color: #00b4ff; color: #ffffff; border: none; padding: 8px 16px; cursor: pointer; margin: 5px 0; display: block; width: 100%; }
-    button:hover { background-color: #0099d6; }
+    .file-input-wrapper { position: relative; margin-bottom: 20px; width: 100%; }
+    .file-input-wrapper input[type="file"] { position: absolute; left: 0; top: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; z-index: 2; }
+    .file-input-label { 
+      display: block; 
+      padding: 8px 16px; 
+      background: linear-gradient(to bottom, #00b4ff, #0099d6); 
+      color: #ffffff; 
+      text-align: center; 
+      cursor: pointer; 
+      position: relative; 
+      z-index: 1; 
+      border: 2px solid #868d9e;
+      border-radius: 8px;
+      transition: all 0.3s ease;
+    }
+    .file-input-label:hover { 
+      background: linear-gradient(to bottom, #0099d6, #0088c3); 
+      border-color: #a0a7b8;
+    }
+    button { 
+      background: linear-gradient(to bottom, #00b4ff, #0099d6); 
+      color: #ffffff; 
+      border: 2px solid #868d9e; 
+      padding: 8px 16px; 
+      cursor: pointer; 
+      margin: 5px 0; 
+      display: block; 
+      width: 100%; 
+      border-radius: 8px;
+      transition: all 0.3s ease;
+    }
+    button:hover { 
+      background: linear-gradient(to bottom, #0099d6, #0088c3); 
+      border-color: #a0a7b8;
+    }
+    .axis-arrow {
+      position: absolute;
+      stroke: #ffffff;
+      stroke-width: 2;
+      fill: none;
+    }
+    .axis-label {
+      position: absolute;
+      color: #ffffff;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
   <div id="app">
     <div id="sidebar">
-      <input type="file" id="stlInput" accept=".stl" />
-      <button id="selectTopFaceBtn">Select Top Face</button>
-      <button id="rotateBtn">Rotate to Worktable</button>
-      <button id="selectLeadInBtn">Select Lead-In</button>
-      <button id="selectLeadOutBtn">Select Lead-Out</button>
-      <button id="selectPathBtn">Select Path</button> <!-- New button -->
+      <div class="sidebar-top">
+        <div class="file-input-wrapper">
+          <input type="file" id="stlInput" accept=".stl" />
+          <label for="stlInput" class="file-input-label">Import STL Or Drag & Drop</label>
+        </div>
+        <button id="selectTopFaceBtn">Select Top Face</button>
+        <button id="rotateBtn">Rotate to Worktable</button>
+        <button id="selectLeadInBtn">Select Lead-In</button>
+        <button id="selectLeadOutBtn">Select Lead-Out</button>
+        <button id="selectPathBtn">Select Path</button>
+      </div>
+      <div class="sidebar-bottom">
+        <div id="topView"></div>
+      </div>
     </div>
     <div id="main">
       <div id="renderContainer"></div>

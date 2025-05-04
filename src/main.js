@@ -7,10 +7,59 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer();
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-document.getElementById('renderContainer').appendChild(renderer.domElement);
+let controls = null; // Declare controls variable
+
+// Function to initialize the renderer after DOM is ready
+const initializeRenderer = () => {
+  const container = document.getElementById('renderContainer');
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+  
+  renderer.setSize(width, height);
+  renderer.setClearColor(0x222936);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  
+  // Ensure the container is ready before appending
+  if (container && !container.contains(renderer.domElement)) {
+    container.appendChild(renderer.domElement);
+  }
+  
+  // Update camera aspect ratio
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+
+  // Initialize or update controls
+  if (!controls) {
+    controls = new TrackballControls(camera, renderer.domElement);
+    controls.rotateSpeed = 1.0;
+    controls.zoomSpeed = 1.2;
+    controls.panSpeed = 0.8;
+    controls.noZoom = false;
+    controls.noPan = false;
+    controls.staticMoving = true;
+    controls.rotateButton = THREE.MOUSE.MIDDLE;
+    controls.zoomButton = THREE.MOUSE.RIGHT;
+    controls.panButton = null;
+    controls.enabled = true;
+    controls.screenSpacePanning = false;
+  } else {
+    controls.enabled = true;
+  }
+};
+
+// Wait for DOM to be fully loaded and layout to be established
+document.addEventListener('DOMContentLoaded', () => {
+  // Small delay to ensure layout is complete
+  setTimeout(() => {
+    initializeRenderer();
+    
+    // Update on window resize
+    window.addEventListener('resize', () => {
+      initializeRenderer();
+    });
+  }, 0);
+});
 
 // Lighting
 const light = new THREE.DirectionalLight(0xffffff, 2.0);
@@ -79,20 +128,6 @@ const updateAxes = (bbox) => {
   axes.add(xAxis, yAxis, zAxis, xLabel, yLabel, zLabel);
 };
 scene.add(axes);
-
-// TrackballControls
-const controls = new TrackballControls(camera, renderer.domElement);
-controls.rotateSpeed = 1.0;
-controls.zoomSpeed = 1.2;
-controls.panSpeed = 0.8;
-controls.noZoom = false;
-controls.noPan = false;
-controls.staticMoving = true;
-controls.rotateButton = THREE.MOUSE.MIDDLE;
-controls.zoomButton = THREE.MOUSE.RIGHT;
-controls.panButton = null;
-controls.enabled = true;
-controls.screenSpacePanning = false;
 
 // Raycaster for face selection, lead-in, and lead-out selection
 const raycaster = new THREE.Raycaster();
@@ -261,7 +296,83 @@ selectLeadOutBtn.addEventListener('click', () => {
   }
 });
 
-// Function to detect perimeters and highlight them using TubeGeometry
+// Add these variables at the top with other state variables
+let topViewCanvas = null;
+let topViewContext = null;
+let perimeterScale = 1;
+let perimeterOffset = new THREE.Vector2();
+let topSortedPerimeter = [];
+let bottomSortedPerimeter = [];
+
+// Add this function to draw the sorted perimeter vectors in the 2D viewport
+function drawPerimeters2D(topPerimeter, bottomPerimeter, leadIn = null, leadOut = null) {
+  if (!topViewCanvas || !topViewContext) return;
+  topViewContext.clearRect(0, 0, topViewCanvas.width, topViewCanvas.height);
+
+  // Helper to project 3D point to 2D (X, Y)
+  const project = (v) => [
+    (v.x * perimeterScale) + perimeterOffset.x,
+    (v.y * perimeterScale) + perimeterOffset.y
+  ];
+
+  // Draw top perimeter (cyan)
+  if (topPerimeter && topPerimeter.length > 1) {
+    topViewContext.strokeStyle = '#00ffff';
+    topViewContext.lineWidth = 2;
+    topViewContext.beginPath();
+    let [x, y] = project(topPerimeter[0]);
+    topViewContext.moveTo(x, y);
+    for (let i = 1; i < topPerimeter.length; i++) {
+      [x, y] = project(topPerimeter[i]);
+      topViewContext.lineTo(x, y);
+    }
+    [x, y] = project(topPerimeter[0]);
+    topViewContext.lineTo(x, y);
+    topViewContext.stroke();
+  }
+
+  // Draw bottom perimeter (magenta)
+  if (bottomPerimeter && bottomPerimeter.length > 1) {
+    topViewContext.strokeStyle = '#ff00ff';
+    topViewContext.lineWidth = 2;
+    topViewContext.beginPath();
+    let [x, y] = project(bottomPerimeter[0]);
+    topViewContext.moveTo(x, y);
+    for (let i = 1; i < bottomPerimeter.length; i++) {
+      [x, y] = project(bottomPerimeter[i]);
+      topViewContext.lineTo(x, y);
+    }
+    [x, y] = project(bottomPerimeter[0]);
+    topViewContext.lineTo(x, y);
+    topViewContext.stroke();
+  }
+
+  // Draw lead-in point (green)
+  if (leadIn) {
+    const [x, y] = project(leadIn);
+    topViewContext.beginPath();
+    topViewContext.arc(x, y, 7, 0, 2 * Math.PI);
+    topViewContext.fillStyle = '#00ff00';
+    topViewContext.fill();
+    topViewContext.strokeStyle = '#006400';
+    topViewContext.lineWidth = 2;
+    topViewContext.stroke();
+  }
+
+  // Draw lead-out point (red)
+  if (leadOut) {
+    const [x, y] = project(leadOut);
+    topViewContext.beginPath();
+    topViewContext.arc(x, y, 7, 0, 2 * Math.PI);
+    topViewContext.fillStyle = '#ff4040';
+    topViewContext.fill();
+    topViewContext.strokeStyle = '#8b0000';
+    topViewContext.lineWidth = 2;
+    topViewContext.stroke();
+  }
+}
+
+// Modify the detectPerimeters function to ensure we're using the same perimeter detection
 const detectPerimeters = () => {
   if (!mesh) return;
 
@@ -328,7 +439,80 @@ const detectPerimeters = () => {
     }
   }
 
-  // Highlight perimeters in yellow using TubeGeometry
+  // --- Calculate sorted connect-the-dots perimeter arrays first ---
+  topSortedPerimeter = [];
+  if (topPerimeterSet.length > 0) {
+    const pointKey = (v) => `${v.x.toFixed(5)},${v.y.toFixed(5)},${v.z.toFixed(5)}`;
+    const used = new Set();
+    const firstEdge = topPerimeterSet[0];
+    let current = firstEdge[0];
+    topSortedPerimeter = [current.clone()];
+    used.add(pointKey(current));
+    while (true) {
+      let found = false;
+      for (let [a, b] of topPerimeterSet) {
+        if (areVerticesEqual(current, a) && !used.has(pointKey(b))) {
+          if (!areVerticesEqual(b, topSortedPerimeter[topSortedPerimeter.length - 1])) {
+            topSortedPerimeter.push(b.clone());
+          }
+          used.add(pointKey(b));
+          current = b;
+          found = true;
+          break;
+        } else if (areVerticesEqual(current, b) && !used.has(pointKey(a))) {
+          if (!areVerticesEqual(a, topSortedPerimeter[topSortedPerimeter.length - 1])) {
+            topSortedPerimeter.push(a.clone());
+          }
+          used.add(pointKey(a));
+          current = a;
+          found = true;
+          break;
+        }
+      }
+      if (!found) break;
+    }
+    console.log('Top perimeter connect-the-dots vector:', topSortedPerimeter);
+  }
+
+  bottomSortedPerimeter = [];
+  if (bottomPerimeterSet.length > 0) {
+    const pointKey = (v) => `${v.x.toFixed(5)},${v.y.toFixed(5)},${v.z.toFixed(5)}`;
+    const used = new Set();
+    const firstEdge = bottomPerimeterSet[0];
+    let current = firstEdge[0];
+    bottomSortedPerimeter = [current.clone()];
+    used.add(pointKey(current));
+    while (true) {
+      let found = false;
+      for (let [a, b] of bottomPerimeterSet) {
+        if (areVerticesEqual(current, a) && !used.has(pointKey(b))) {
+          if (!areVerticesEqual(b, bottomSortedPerimeter[bottomSortedPerimeter.length - 1])) {
+            bottomSortedPerimeter.push(b.clone());
+          }
+          used.add(pointKey(b));
+          current = b;
+          found = true;
+          break;
+        } else if (areVerticesEqual(current, b) && !used.has(pointKey(a))) {
+          if (!areVerticesEqual(a, bottomSortedPerimeter[bottomSortedPerimeter.length - 1])) {
+            bottomSortedPerimeter.push(a.clone());
+          }
+          used.add(pointKey(a));
+          current = a;
+          found = true;
+          break;
+        }
+      }
+      if (!found) break;
+    }
+    console.log('Bottom perimeter connect-the-dots vector:', bottomSortedPerimeter);
+  }
+  // --- End perimeter sorting ---
+
+  // Draw the sorted perimeters in the 2D viewport
+  drawPerimeters2D(topSortedPerimeter, bottomSortedPerimeter, topLeadIn, topLeadOut);
+
+  // Now generate the yellow tube geometry from the perimeter sets
   if (currentPerimeterLine) {
     scene.remove(currentPerimeterLine);
   }
@@ -459,6 +643,9 @@ const onMouseClick = (event) => {
       leadInSelectionMode = false;
       const selectLeadInBtn = document.getElementById('selectLeadInBtn');
       selectLeadInBtn.textContent = 'Select Lead-In';
+
+      // Draw the sorted perimeters in the 2D viewport
+      drawPerimeters2D(topSortedPerimeter, bottomSortedPerimeter, topLeadIn, topLeadOut);
     }
   } else if (leadOutSelectionMode) {
     // Confirm the lead-out point on click
@@ -497,6 +684,9 @@ const onMouseClick = (event) => {
       leadOutSelectionMode = false;
       const selectLeadOutBtn = document.getElementById('selectLeadOutBtn');
       selectLeadOutBtn.textContent = 'Select Lead-Out';
+
+      // Draw the sorted perimeters in the 2D viewport
+      drawPerimeters2D(topSortedPerimeter, bottomSortedPerimeter, topLeadIn, topLeadOut);
     }
   }
 };
@@ -578,8 +768,9 @@ renderer.domElement.addEventListener('mousemove', onMouseMove);
 
 // STL Loader
 const loader = new STLLoader();
-document.getElementById('stlInput').addEventListener('change', (event) => {
-  const file = event.target.files[0];
+
+// Handle drag and drop events
+const handleFileDrop = (file) => {
   if (file) {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -628,15 +819,71 @@ document.getElementById('stlInput').addEventListener('change', (event) => {
 
       // Reset face colors and perimeters on new model load
       resetFaceColors();
+
+      // Initialize the 2D view canvas
+      const topView = document.getElementById('topView');
+      topViewCanvas = document.createElement('canvas');
+      topViewCanvas.width = topView.clientWidth;
+      topViewCanvas.height = topView.clientHeight;
+      topView.appendChild(topViewCanvas);
+      topViewContext = topViewCanvas.getContext('2d');
+      
+      // Calculate scale and offset for the 2D view (can keep for future use)
+      const viewBboxSize = geometry.boundingBox.getSize(new THREE.Vector3());
+      const maxDim = Math.max(viewBboxSize.x, viewBboxSize.y);
+      perimeterScale = Math.min(
+        topViewCanvas.width / maxDim,
+        topViewCanvas.height / maxDim
+      ) * 0.8; // 80% of the available space
+      
+      perimeterOffset.set(
+        topViewCanvas.width / 2,
+        topViewCanvas.height / 2
+      );
     };
     reader.readAsArrayBuffer(file);
+  }
+};
+
+// Add drag and drop event listeners to the entire app
+const app = document.getElementById('app');
+app.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  app.style.backgroundColor = 'rgba(0, 180, 255, 0.1)';
+});
+
+app.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  app.style.backgroundColor = '';
+});
+
+app.addEventListener('drop', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  app.style.backgroundColor = '';
+  
+  const file = e.dataTransfer.files[0];
+  if (file && file.name.toLowerCase().endsWith('.stl')) {
+    handleFileDrop(file);
+  }
+});
+
+// Keep the existing file input handler
+document.getElementById('stlInput').addEventListener('change', (event) => {
+  const file = event.target.files[0];
+  if (file) {
+    handleFileDrop(file);
   }
 });
 
 // Animation loop
 function animate() {
   requestAnimationFrame(animate);
-  controls.update();
+  if (controls) {
+    controls.update();
+  }
   light.position.set(camera.position.x, camera.position.y, 500);
   light.target.position.set(camera.position.x, camera.position.y, 0);
   light.target.updateMatrixWorld();
@@ -644,9 +891,24 @@ function animate() {
 }
 animate();
 
-// Handle window resize
+// Add resize handler for the 2D view
 window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (topViewCanvas && mesh) {
+    const topView = document.getElementById('topView');
+    topViewCanvas.width = topView.clientWidth;
+    topViewCanvas.height = topView.clientHeight;
+    
+    // Recalculate scale and offset
+    const resizeBboxSize = mesh.geometry.boundingBox.getSize(new THREE.Vector3());
+    const maxDim = Math.max(resizeBboxSize.x, resizeBboxSize.y);
+    perimeterScale = Math.min(
+      topViewCanvas.width / maxDim,
+      topViewCanvas.height / maxDim
+    ) * 0.8;
+    
+    perimeterOffset.set(
+      topViewCanvas.width / 2,
+      topViewCanvas.height / 2
+    );
+  }
 });
