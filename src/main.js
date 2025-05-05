@@ -148,6 +148,7 @@ let topLeadIn = null;
 let leadInDot = null;
 let topLeadOut = null; // Store the selected lead-out point
 let leadOutDot = null; // The dot mesh for highlighting the lead-out point
+let midplaneWallFaceSet = [];
 
 // Reset face colors, perimeters, lead-in, and lead-out to default
 const resetFaceColors = () => {
@@ -303,9 +304,12 @@ let perimeterScale = 1;
 let perimeterOffset = new THREE.Vector2();
 let topSortedPerimeter = [];
 let bottomSortedPerimeter = [];
+let midSortedPerimeter = [];
+let midPerimeterSet = [];
+let midPlaneZ = null;
 
 // Add this function to draw the sorted perimeter vectors in the 2D viewport
-function drawPerimeters2D(topPerimeter, bottomPerimeter, leadIn = null, leadOut = null) {
+function drawPerimeters2D(topPerimeter, bottomPerimeter, leadIn = null, leadOut = null, midPerimeter = null) {
   if (!topViewCanvas || !topViewContext) return;
   topViewContext.clearRect(0, 0, topViewCanvas.width, topViewCanvas.height);
 
@@ -343,6 +347,22 @@ function drawPerimeters2D(topPerimeter, bottomPerimeter, leadIn = null, leadOut 
       topViewContext.lineTo(x, y);
     }
     [x, y] = project(bottomPerimeter[0]);
+    topViewContext.lineTo(x, y);
+    topViewContext.stroke();
+  }
+
+  // Draw midplane perimeter (orange)
+  if (midPerimeter && midPerimeter.length > 1) {
+    topViewContext.strokeStyle = '#ffa500';
+    topViewContext.lineWidth = 2;
+    topViewContext.beginPath();
+    let [x, y] = project(midPerimeter[0]);
+    topViewContext.moveTo(x, y);
+    for (let i = 1; i < midPerimeter.length; i++) {
+      [x, y] = project(midPerimeter[i]);
+      topViewContext.lineTo(x, y);
+    }
+    [x, y] = project(midPerimeter[0]);
     topViewContext.lineTo(x, y);
     topViewContext.stroke();
   }
@@ -509,14 +529,123 @@ const detectPerimeters = () => {
   }
   // --- End perimeter sorting ---
 
-  // Draw the sorted perimeters in the 2D viewport
-  drawPerimeters2D(topSortedPerimeter, bottomSortedPerimeter, topLeadIn, topLeadOut);
+  // --- Calculate midplane and its wall faces ---
+  midplaneWallFaceSet = [];
+  midPlaneZ = null;
+  midPerimeterSet = [];
+  midSortedPerimeter = [];
+  if (topSortedPerimeter.length > 0 && bottomSortedPerimeter.length > 0) {
+    // 1. Get z height of top plane and z height of bottom plane. Average them to get the z height of the midplane.
+    const avgZ = (arr) => arr.reduce((sum, v) => sum + v.z, 0) / arr.length;
+    const zTop = avgZ(topSortedPerimeter);
+    const zBot = avgZ(bottomSortedPerimeter);
+    midPlaneZ = (zTop + zBot) / 2;
 
-  // Now generate the yellow tube geometry from the perimeter sets
+    // 2. Loop through every triangle in wallFaceSet
+    const geometry = mesh.geometry;
+    const positions = geometry.attributes.position.array;
+    const getTriangleVertices = (faceIdx) => {
+      const vertices = [];
+      for (let i = 0; i < 3; i++) {
+        vertices.push(new THREE.Vector3(
+          positions[faceIdx * 9 + i * 3],
+          positions[faceIdx * 9 + i * 3 + 1],
+          positions[faceIdx * 9 + i * 3 + 2]
+        ));
+      }
+      return vertices;
+    };
+    midPerimeterSet = [];
+    for (let wallFaceIdx of wallFaceSet) {
+      const verts = getTriangleVertices(wallFaceIdx);
+      const zVals = verts.map(v => v.z);
+      const minZ = Math.min(...zVals);
+      const maxZ = Math.max(...zVals);
+      // 2. If the midplane z height is within the range (inclusive), add to midplaneWallFaceSet
+      if (midPlaneZ >= minZ && midPlaneZ <= maxZ) {
+        midplaneWallFaceSet.push(wallFaceIdx);
+        // --- Intersection logic ---
+        let intersectionPoints = [];
+        for (let i = 0; i < 3; i++) {
+          const vA = verts[i];
+          const vB = verts[(i + 1) % 3];
+          // Edge crosses the midplane
+          if ((vA.z - midPlaneZ) * (vB.z - midPlaneZ) < 0) {
+            const t = (midPlaneZ - vA.z) / (vB.z - vA.z);
+            const p = new THREE.Vector3(
+              vA.x + t * (vB.x - vA.x),
+              vA.y + t * (vB.y - vA.y),
+              midPlaneZ
+            );
+            if (!intersectionPoints.some(pt => pt.distanceTo(p) < 1e-6)) {
+              intersectionPoints.push(p);
+            }
+          } else if (Math.abs(vA.z - midPlaneZ) < 1e-6 && Math.abs(vB.z - midPlaneZ) < 1e-6) {
+            if (!intersectionPoints.some(pt => pt.distanceTo(vA) < 1e-6)) intersectionPoints.push(vA.clone());
+            if (!intersectionPoints.some(pt => pt.distanceTo(vB) < 1e-6)) intersectionPoints.push(vB.clone());
+          } else {
+            if (Math.abs(vA.z - midPlaneZ) < 1e-6 && !intersectionPoints.some(pt => pt.distanceTo(vA) < 1e-6)) {
+              intersectionPoints.push(vA.clone());
+            }
+            if (Math.abs(vB.z - midPlaneZ) < 1e-6 && !intersectionPoints.some(pt => pt.distanceTo(vB) < 1e-6)) {
+              intersectionPoints.push(vB.clone());
+            }
+          }
+        }
+        if (intersectionPoints.length >= 2) {
+          for (let i = 0; i < intersectionPoints.length - 1; i++) {
+            for (let j = i + 1; j < intersectionPoints.length; j++) {
+              midPerimeterSet.push([intersectionPoints[i].clone(), intersectionPoints[j].clone()]);
+            }
+          }
+        }
+      }
+    }
+    // Sort the segments into a connect-the-dots perimeter
+    midSortedPerimeter = [];
+    if (midPerimeterSet.length > 0) {
+      const pointKey = (v) => `${v.x.toFixed(5)},${v.y.toFixed(5)},${v.z.toFixed(5)}`;
+      const used = new Set();
+      let current = midPerimeterSet[0][0];
+      midSortedPerimeter = [current.clone()];
+      used.add(pointKey(current));
+      while (true) {
+        let found = false;
+        for (let [a, b] of midPerimeterSet) {
+          if (current.distanceTo(a) < 1e-6 && !used.has(pointKey(b))) {
+            if (midSortedPerimeter.length === 0 || b.distanceTo(midSortedPerimeter[midSortedPerimeter.length - 1]) > 1e-6) {
+              midSortedPerimeter.push(b.clone());
+            }
+            used.add(pointKey(b));
+            current = b;
+            found = true;
+            break;
+          } else if (current.distanceTo(b) < 1e-6 && !used.has(pointKey(a))) {
+            if (midSortedPerimeter.length === 0 || a.distanceTo(midSortedPerimeter[midSortedPerimeter.length - 1]) > 1e-6) {
+              midSortedPerimeter.push(a.clone());
+            }
+            used.add(pointKey(a));
+            current = a;
+            found = true;
+            break;
+          }
+        }
+        if (!found) break;
+      }
+    }
+    console.log('midPerimeterSet:', midPerimeterSet);
+    console.log('midSortedPerimeter:', midSortedPerimeter);
+  }
+  // --- End midplane calculation ---
+
+  // Draw the sorted perimeters in the 2D viewport (now includes midplane)
+  drawPerimeters2D(topSortedPerimeter, bottomSortedPerimeter, topLeadIn, topLeadOut, midSortedPerimeter);
+
+  // Now generate the yellow tube geometry from the perimeter sets, and orange for midplane
   if (currentPerimeterLine) {
     scene.remove(currentPerimeterLine);
   }
-  const allSegments = [...topPerimeterSet, ...bottomPerimeterSet];
+  const allSegments = [...topPerimeterSet, ...bottomPerimeterSet, ...midPerimeterSet];
   if (allSegments.length > 0) {
     const tubeRadius = maxBoundingBoxDimension * 0.01;
     const tubeGeometries = [];
@@ -525,10 +654,8 @@ const detectPerimeters = () => {
       const tubeGeometry = new THREE.TubeGeometry(path, 1, tubeRadius, 8, false);
       tubeGeometries.push(tubeGeometry);
     });
-
-    const mergedGeometry = BufferGeometryUtils.mergeGeometries(tubeGeometries);
-    const tubeMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 }); // Yellow
-    currentPerimeterLine = new THREE.Mesh(mergedGeometry, tubeMaterial);
+    const tubeMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 }); // Yellow for all perimeters
+    currentPerimeterLine = new THREE.Mesh(BufferGeometryUtils.mergeGeometries(tubeGeometries), tubeMaterial);
     scene.add(currentPerimeterLine);
   }
 };
@@ -645,7 +772,7 @@ const onMouseClick = (event) => {
       selectLeadInBtn.textContent = 'Select Lead-In';
 
       // Draw the sorted perimeters in the 2D viewport
-      drawPerimeters2D(topSortedPerimeter, bottomSortedPerimeter, topLeadIn, topLeadOut);
+      drawPerimeters2D(topSortedPerimeter, bottomSortedPerimeter, topLeadIn, topLeadOut, midSortedPerimeter);
     }
   } else if (leadOutSelectionMode) {
     // Confirm the lead-out point on click
@@ -686,7 +813,7 @@ const onMouseClick = (event) => {
       selectLeadOutBtn.textContent = 'Select Lead-Out';
 
       // Draw the sorted perimeters in the 2D viewport
-      drawPerimeters2D(topSortedPerimeter, bottomSortedPerimeter, topLeadIn, topLeadOut);
+      drawPerimeters2D(topSortedPerimeter, bottomSortedPerimeter, topLeadIn, topLeadOut, midSortedPerimeter);
     }
   }
 };
@@ -910,5 +1037,26 @@ window.addEventListener('resize', () => {
       topViewCanvas.width / 2,
       topViewCanvas.height / 2
     );
+  }
+});
+
+// Add a button to import test2.stl
+const importTest2Btn = document.createElement('button');
+importTest2Btn.textContent = 'Try Me';
+importTest2Btn.style.marginBottom = '10px';
+const sidebarTop = document.querySelector('.sidebar-top');
+sidebarTop.insertBefore(importTest2Btn, sidebarTop.firstChild);
+
+importTest2Btn.addEventListener('click', async () => {
+  // Fetch the file from the local directory
+  try {
+    const response = await fetch('test2.stl');
+    if (!response.ok) throw new Error('Failed to load test2.stl');
+    const arrayBuffer = await response.arrayBuffer();
+    // Create a File-like object
+    const file = new File([arrayBuffer], 'test2.stl', { type: 'application/sla' });
+    handleFileDrop(file);
+  } catch (err) {
+    alert('Could not load test2.stl: ' + err.message);
   }
 });
