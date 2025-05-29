@@ -1,122 +1,91 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Wire EDM CAM Tool</title>
-  <style>
-    body { margin: 0; overflow: hidden; background-color: #222936; color: #ffffff; font-family: Arial, sans-serif; }
-    #app { display: flex; height: 100vh; padding: 10px; box-sizing: border-box; }
-    #sidebar { 
-      width: 25%; 
-      background-color: #2a3440; 
-      padding: 20px; 
-      box-sizing: border-box; 
-      border: 3px solid #868d9e; 
-      border-radius: 8px;
-      margin-right: 10px;
-      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-      display: flex;
-      flex-direction: column;
-    }
-    .sidebar-top {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-    }
-    .sidebar-bottom {
-      flex: 1;
-      margin-top: 20px;
-    }
-    #topView {
-      width: 100%;
-      height: 100%;
-      background-color: #000000;
-      border: 2px solid #868d9e;
-      border-radius: 8px;
-    }
-    #main { 
-      flex: 1; 
-      position: relative;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    #renderContainer { width: 100%; height: 100%; }
-    #stlInput { margin-bottom: 20px; padding: 8px; background-color: #444; border: 1px solid #00b4ff; color: #ffffff; cursor: pointer; }
-    #stlInput::-webkit-file-upload-button { background-color: #00b4ff; color: #ffffff; border: none; padding: 6px 12px; cursor: pointer; }
-    #stlInput::-webkit-file-upload-button:hover { background-color: #0099d6; }
-    .file-input-wrapper { position: relative; margin-bottom: 20px; width: 100%; }
-    .file-input-wrapper input[type="file"] { position: absolute; left: 0; top: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; z-index: 2; }
-    .file-input-label { 
-      display: block; 
-      padding: 8px 16px; 
-      background: linear-gradient(to bottom, #00b4ff, #0099d6); 
-      color: #ffffff; 
-      text-align: center; 
-      cursor: pointer; 
-      position: relative; 
-      z-index: 1; 
-      border: 2px solid #868d9e;
-      border-radius: 8px;
-      transition: all 0.3s ease;
-    }
-    .file-input-label:hover { 
-      background: linear-gradient(to bottom, #0099d6, #0088c3); 
-      border-color: #a0a7b8;
-    }
-    button { 
-      background: linear-gradient(to bottom, #00b4ff, #0099d6); 
-      color: #ffffff; 
-      border: 2px solid #868d9e; 
-      padding: 8px 16px; 
-      cursor: pointer; 
-      margin: 5px 0; 
-      display: block; 
-      width: 100%; 
-      border-radius: 8px;
-      transition: all 0.3s ease;
-    }
-    button:hover { 
-      background: linear-gradient(to bottom, #0099d6, #0088c3); 
-      border-color: #a0a7b8;
-    }
-    .axis-arrow {
-      position: absolute;
-      stroke: #ffffff;
-      stroke-width: 2;
-      fill: none;
-    }
-    .axis-label {
-      position: absolute;
-      color: #ffffff;
-      font-family: Arial, sans-serif;
-      font-size: 14px;
-      pointer-events: none;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WEDM.XYZ - 4 Axis CAM</title>
+    <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
-  <div id="app">
     <div id="sidebar">
-      <div class="sidebar-top">
-        <div class="file-input-wrapper">
-          <input type="file" id="stlInput" accept=".stl" />
-          <label for="stlInput" class="file-input-label">Import STL Or Drag & Drop</label>
+        <h1><a href="https://github.com/alextreseder/wedm.xyz" target="_blank">WEDM.XYZ</a> - 4 axis CAM</h1>
+
+        <div class="sidebar-section">
+            <h2>Part Definition (Rectangle)</h2>
+            <label for="origin-x">Origin X (mm):</label>
+            <input type="number" id="origin-x" value="0">
+
+            <label for="origin-y">Origin Y (mm):</label>
+            <input type="number" id="origin-y" value="0">
+
+            <label for="width">Width (mm):</label>
+            <input type="number" id="width" value="50">
+
+            <label for="height">Height (mm):</label>
+            <input type="number" id="height" value="30">
+
+            <label for="z-top">Z Top (mm):</label>
+            <input type="number" id="z-top" value="20">
+
+            <label for="part-thickness">Part Thickness (mm):</label>
+            <input type="number" id="part-thickness" value="10">
         </div>
-        <button id="selectTopFaceBtn">Select Top Face</button>
-        <button id="rotateBtn">Rotate to Worktable</button>
-        <button id="selectLeadInBtn">Select Lead-In</button>
-        <button id="selectLeadOutBtn">Select Lead-Out</button>
-        <button id="selectPathBtn">Select Path</button>
-      </div>
-      <div class="sidebar-bottom">
-        <div id="topView"></div>
-      </div>
+
+        <div class="sidebar-section">
+            <h2>Machining Parameters</h2>
+            <label for="wire-diameter">Wire Diameter (mm):</label>
+            <input type="number" id="wire-diameter" value="0.25" step="0.01">
+
+            <label for="cut-type">Cut Type:</label>
+            <select id="cut-type">
+                <option value="external">External Cut (Profile)</option>
+                <option value="internal">Internal Cut (Pocket)</option>
+            </select>
+
+            <label for="taper-angle">Taper Angle (degrees):</label>
+            <input type="number" id="taper-angle" value="5">
+            <small>+ve: Bottom smaller (external), Bottom larger (internal)</small>
+            <small>-ve: Bottom larger (external), Bottom smaller (internal)</small>
+
+            <label for="feed-rate">Feed Rate (mm/min):</label>
+            <input type="number" id="feed-rate" value="100">
+        </div>
+
+        <div class="sidebar-section">
+            <h2>Generate</h2>
+            <button id="generate-paths-btn">Generate Paths & G-Code</button>
+            <button id="clear-paths-btn" class="secondary">Clear Paths</button>
+        </div>
+        
+        <!-- Old buttons, to be removed or integrated if still needed -->
+        <!-- <button id="select-top-face-btn">Select Top Face</button> -->
+        <!-- <button id="select-lead-in-btn">Select Lead In</button> -->
     </div>
-    <div id="main">
-      <div id="renderContainer"></div>
+
+    <div id="main-content">
+        <div id="top-bar">
+            <span id="view-title">3D View</span> 
+            <div id="top-bar-buttons">
+                <button id="load-gear-btn">Load Test Case (Gear)</button>
+                <button id="load-loft-btn">Load Test Case (Loft)</button>
+                <button id="load-stl-btn">Load STL (Optional)</button>
+            </div>
+        </div>
+        <div id="viewport-container">
+            <div id="viewport">
+                <div id="view-3d">3D Viewport (placeholder)</div>
+                <div id="view-2d" style="display:none;">2D Viewport (placeholder)</div>
+                <textarea id="gcode-editor" style="display:none;" placeholder="G-Code will appear here..."></textarea>
+            </div>
+            <div id="viewport-modes">
+                <button id="mode-3d-btn" class="active">3D</button>
+                <button id="mode-2d-btn">2D</button>
+                <button id="mode-gcode-btn">G-Code</button>
+            </div>
+        </div>
     </div>
-  </div>
-  <script type="module" src="/src/main.js"></script>
+
+    <script type="module" src="/src/main.js"></script>
 </body>
 </html>
