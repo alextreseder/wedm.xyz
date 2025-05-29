@@ -268,10 +268,10 @@ if (loadStlBtn) {
     loadStlBtn.addEventListener('click', () => fileInput.click());
 }
 if (loadGearBtn) {
-    loadGearBtn.addEventListener('click', () => loadSTLFromFilePath('/gear.stl'));
+    loadGearBtn.addEventListener('click', () => loadSTLFromFilePath('gear.stl'));
 }
 if (loadLoftBtn) {
-    loadLoftBtn.addEventListener('click', () => loadSTLFromFilePath('/loft.stl'));
+    loadLoftBtn.addEventListener('click', () => loadSTLFromFilePath('loft.stl'));
 }
 fileInput.addEventListener('change', handleFileSelect);
 
