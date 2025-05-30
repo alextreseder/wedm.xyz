@@ -143,6 +143,17 @@ body {
     background-color: var(--theme-accent-lightblue);
 }
 
+/* Style for active selection mode button */
+#sidebar button.active-selection {
+    background-color: var(--theme-accent-green); /* Use green to indicate active mode */
+    color: #FFFFFF;
+    box-shadow: 0 0 8px rgba(66, 183, 42, 0.5); /* Glow effect */
+}
+
+#sidebar button.active-selection:hover {
+    background-color: #36A420; /* Darker green on hover */
+}
+
 #sidebar button.secondary {
     background-color: var(--theme-bg-medium);
     color: var(--theme-text-primary);
