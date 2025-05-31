@@ -39,6 +39,9 @@ const TOP_FACE_COLOR = new THREE.Color(0xCBC3E3); // Light Purple
 const BOTTOM_FACE_COLOR = new THREE.Color(0xAFEEEE); // Light Cyan / PaleTurquoise
 const WALL_FACE_COLOR = new THREE.Color(0xFFDAB9); // Light Orange / PeachPuff
 
+let processedPerimeters = { top: [], mid: [], bottom: [] };
+let canvas2D, ctx2D;
+
 function init3DView() {
     if (!view3DContainer || view3DContainer.dataset.initialized) return;
 
@@ -284,12 +287,20 @@ function animate() {
 }
 
 function onWindowResize() {
-    if (camera && renderer && view3DContainer) {
+    if (camera && renderer && view3DContainer && view3DContainer.style.display !== 'none') {
         const width = view3DContainer.clientWidth;
         const height = view3DContainer.clientHeight;
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
         renderer.setSize(width, height);
+    }
+    if (canvas2D && ctx2D && view2D.style.display !== 'none') {
+        // Ensure canvas logical size matches display size
+        if (canvas2D.width !== canvas2D.clientWidth || canvas2D.height !== canvas2D.clientHeight) {
+            canvas2D.width = canvas2D.clientWidth;
+            canvas2D.height = canvas2D.clientHeight;
+        }
+        draw2DPerimeters(); // Redraw on resize
     }
 }
 window.addEventListener('resize', onWindowResize);
@@ -305,9 +316,11 @@ function setActiveView(viewToShow, btnToActivate, title) {
     if (viewToShow) {
         viewToShow.style.display = 'block';
         if (viewToShow.id === 'view-3d') {
-            // Removed redundant placeholder check, init3DView handles clearing if needed.
             init3DView();
-            onWindowResize();
+            onWindowResize(); // Ensure 3D canvas is sized correctly
+        } else if (viewToShow.id === 'view-2d') {
+            init2DView(); // Initialize 2D canvas and context
+            draw2DPerimeters(); // Draw current perimeters
         }
     }
     if (btnToActivate) btnToActivate.classList.add('active');
@@ -327,457 +340,356 @@ if (modeGCodeBtn) {
 // Set initial view
 setActiveView(view3DContainer, mode3DBtn, '3D View');
 
-// Remove the old "Hello Vite!" message
-// document.querySelector('#app').innerHTML = `
-//   <h1>Hello Vite!</h1>
-//   <a href="https://vitejs.dev/guide/features.html" target="_blank">Documentation</a>
-// `;
-
-// New function to handle face selection clicks
+// Function to handle face selection clicks
 function onMouseClickForSelection(event) {
     if (!selectionModeActive || !currentObject || !camera || !renderer) return;
-
     const rect = renderer.domElement.getBoundingClientRect();
     mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObject(currentObject, false);
-
     if (intersects.length > 0) {
         const intersect = intersects[0];
         if (intersect.object === currentObject && intersect.face && intersect.object.geometry) {
-            // console.log('Clicked face index on original geometry:', intersect.face.a, intersect.face.b, intersect.face.c);
-            // console.log('Face normal (local to object):' , intersect.face.normal);
-            identifyAndColorFaces(intersect.object, intersect.face);
+            MeshProcessor(intersect.object, intersect.face);
         } else {
-            console.warn('Intersection is not the main object or lacks face/geometry.', intersect);
+            console.warn('Raycast intersection is not the main object or lacks face/geometry.', intersect);
         }
-    } else {
-        // console.log('No intersection with object.');
     }
 }
 
-function identifyAndColorFaces(object, clickedFaceFromRaycaster) {
-    let originalGeometry = object.geometry;
-    let activeGeometry = object.geometry;
-    if (!activeGeometry.isBufferGeometry) { console.error('Geometry is not BufferGeometry.'); return; }
-    
-    let nonIndexedGeometry = activeGeometry.index ? activeGeometry.toNonIndexed() : activeGeometry;
-    if (!nonIndexedGeometry.attributes.normal || !nonIndexedGeometry.attributes.position) { console.error('Non-indexed geometry is missing normals or positions!'); return; }
-    
-    const numVertices = nonIndexedGeometry.attributes.position.count;
-    if (!nonIndexedGeometry.attributes.color || nonIndexedGeometry.attributes.color.count !== numVertices) {
-        nonIndexedGeometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(numVertices * 3), 3));
+// Helper function to check if a segment already exists in a list
+function segmentExists(segmentList, p1, p2, toleranceSq) {
+    for (const seg of segmentList) {
+        if ((seg.start.distanceToSquared(p1) < toleranceSq && seg.end.distanceToSquared(p2) < toleranceSq) ||
+            (seg.start.distanceToSquared(p2) < toleranceSq && seg.end.distanceToSquared(p1) < toleranceSq)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Helper function to add a point to a list if it's not already present (within tolerance)
+function addUniquePoint(pointList, point, toleranceSq) {
+    if (!pointList.some(p => p.distanceToSquared(point) < toleranceSq)) {
+        pointList.push(point.clone()); // Add a clone to avoid modifying original if point is reused
+    }
+}
+
+// Helper to find intersection of an edge (p1, p2 in local space) with a Z-plane
+function getIntersectionPointLocal(p1, p2, planeZ, epsilonZ) {
+    const d1 = p1.z - planeZ;
+    const d2 = p2.z - planeZ;
+    const epsilonSq = epsilonZ * epsilonZ * 0.01; // Smaller for d1*d2 check
+
+    // Edge is nearly on the plane (both points close)
+    if (Math.abs(d1) < epsilonZ && Math.abs(d2) < epsilonZ) return null; 
+    // Edge is entirely on one side of the plane (and not on the plane itself)
+    if (d1 * d2 > epsilonSq) return null; 
+    // Horizontal edge not crossing (and not on plane, caught above)
+    if (Math.abs(p1.z - p2.z) < epsilonZ) return null; 
+
+    const t = (planeZ - p1.z) / (p2.z - p1.z);
+    // Check if t is within segment bounds (inclusive, with small tolerance)
+    if (t >= -epsilonZ && t <= 1.0 + epsilonZ) { 
+       const intersect = p1.clone().lerp(p2, t);
+       // Final check that the interpolated point is indeed on the plane
+       if (Math.abs(intersect.z - planeZ) < epsilonZ * 2) { // Allow slightly larger tolerance for interpolated point
+         return intersect;
+       }
+    }
+    return null;
+}
+
+function MeshProcessor(object, selectedFaceObject) {
+    if (!object || !object.geometry || !selectedFaceObject || 
+        !selectedFaceObject.normal || typeof selectedFaceObject.a === 'undefined') { 
+        console.error("MeshProcessor: Invalid inputs. Aborting.", { object, geometry: object ? object.geometry : null, selectedFaceObject });
+        deactivateFaceSelectionMode();
+        return;
+    }
+    let displayGeometry = object.geometry;
+    if (displayGeometry.index) {
+        const nonIndexedDisplayGeom = displayGeometry.toNonIndexed();
+        object.geometry = nonIndexedDisplayGeom; 
+        displayGeometry = nonIndexedDisplayGeom;
+    }
+    const numVerticesDisplay = displayGeometry.attributes.position.count;
+    if (!displayGeometry.attributes.color || displayGeometry.attributes.color.count !== numVerticesDisplay) {
+        displayGeometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(numVerticesDisplay * 3), 3));
+    }
+    const colorsAttributeDisplay = displayGeometry.attributes.color;
+    for (let i = 0; i < colorsAttributeDisplay.array.length; i++) { colorsAttributeDisplay.array[i] = 0; }
+    let processedGeometry = object.geometry.clone(); 
+    const { attributes } = processedGeometry;
+    const positionsProcessed = attributes.position;
+    const clickedNormalLocalOriginal = selectedFaceObject.normal.clone(); 
+    const targetNormalLocal = new THREE.Vector3(0, 0, 1);
+    const rotationQuaternion = new THREE.Quaternion().setFromUnitVectors(clickedNormalLocalOriginal, targetNormalLocal);
+    processedGeometry.applyQuaternion(rotationQuaternion);
+    let minZ = Infinity;
+    for (let i = 0; i < positionsProcessed.count; i++) { minZ = Math.min(minZ, positionsProcessed.getZ(i)); }
+    processedGeometry.translate(0, 0, -minZ);
+    const vAIndex = selectedFaceObject.a; 
+    const selectionZ = positionsProcessed.getZ(vAIndex);
+    if (isNaN(selectionZ)) {
+        console.error("MeshProcessor: selectionZ is NaN! Aborting processing.");
+        processedGeometry.dispose();
+        deactivateFaceSelectionMode();
+        return;
+    }
+
+    // Calculate MidPlane Z (in processedGeometry's local space)
+    let midPlaneZ = NaN;
+    const MIN_THICKNESS_FOR_MIDPLANE = 0.01; // Minimum thickness to attempt midplane
+    if (selectionZ > MIN_THICKNESS_FOR_MIDPLANE) { // selectionZ is top, 0 is bottom
+        midPlaneZ = selectionZ / 2.0;
     } else {
-        const colorsArray = nonIndexedGeometry.attributes.color.array;
-        for(let i = 0; i < colorsArray.length; i++) { colorsArray[i] = 0; } // Reset all to 0
-        nonIndexedGeometry.attributes.color.needsUpdate = true;
+        console.log("MeshProcessor: Object too thin or selectionZ invalid for mid-plane calculation.");
     }
-    const colorsAttribute = nonIndexedGeometry.attributes.color;
-    
-    const worldClickedNormal = new THREE.Vector3().copy(clickedFaceFromRaycaster.normal).applyMatrix3(object.normalMatrix).normalize();
-    
-    const vA_orig_world = new THREE.Vector3().fromBufferAttribute(originalGeometry.attributes.position, clickedFaceFromRaycaster.a).applyMatrix4(object.matrixWorld);
-    const vB_orig_world = new THREE.Vector3().fromBufferAttribute(originalGeometry.attributes.position, clickedFaceFromRaycaster.b).applyMatrix4(object.matrixWorld);
-    const vC_orig_world = new THREE.Vector3().fromBufferAttribute(originalGeometry.attributes.position, clickedFaceFromRaycaster.c).applyMatrix4(object.matrixWorld);
-    const clickedFaceVerticesWorldZ = [vA_orig_world.z, vB_orig_world.z, vC_orig_world.z];
 
-    // console.log("Clicked Face Normal (World):", worldClickedNormal);
-    // console.log("Clicked Face Vertices Z (World from original geom):", clickedFaceVerticesWorldZ);
-    
-    let topFaceVertexIndices = [];
-    let bottomFaceVertexIndices = [];
-    let bottomFaceWorldZCoords = []; 
+    // 5. Process each triangle in processedGeometry
+    const EPSILON_Z = 0.001; 
+    const SEGMENT_UNIQUENESS_TOLERANCE_SQ = EPSILON_Z * EPSILON_Z * 0.1;
+    const POINT_UNIQUENESS_TOLERANCE_SQ = SEGMENT_UNIQUENESS_TOLERANCE_SQ; // Can be same or different
+    let topPerimeterSegmentsLocal = [];    
+    let bottomPerimeterSegmentsLocal = []; 
+    let midPlanePerimeterSegmentsLocal = [];
 
-    const boundingBoxForIteration = new THREE.Box3().setFromObject(object); // Use non-indexed for consistency if positions are same
-    const minWorldZForIteration = boundingBoxForIteration.min.z;
-    const posAttr = nonIndexedGeometry.attributes.position;
-    const normalAttr = nonIndexedGeometry.attributes.normal; // Should be available due to check above
+    for (let i = 0; i < positionsProcessed.count; i += 3) {
+        const triIndices = [i, i + 1, i + 2];
+        const v1 = new THREE.Vector3().fromBufferAttribute(positionsProcessed, triIndices[0]);
+        const v2 = new THREE.Vector3().fromBufferAttribute(positionsProcessed, triIndices[1]);
+        const v3 = new THREE.Vector3().fromBufferAttribute(positionsProcessed, triIndices[2]);
+        const triVerticesLocal = [v1, v2, v3]; // Vertices in processedGeometry local space
 
-    for (let i = 0; i < numVertices; i += 3) {
-        // For non-indexed, face normal can be derived from first vertex's normal if flat shaded,
-        // or recomputed. Assuming STLs might not have perfect vertex normals for this.
-        // Recomputing face normal from non-indexed positions:
-        const p1_local_face = new THREE.Vector3().fromBufferAttribute(posAttr, i);
-        const p2_local_face = new THREE.Vector3().fromBufferAttribute(posAttr, i + 1);
-        const p3_local_face = new THREE.Vector3().fromBufferAttribute(posAttr, i + 2);
-        const currentFaceLocalNormal = new THREE.Vector3().subVectors(p3_local_face, p2_local_face).cross(new THREE.Vector3().subVectors(p1_local_face, p2_local_face)).normalize();
-        const currentWorldNormal = currentFaceLocalNormal.clone().applyMatrix3(object.normalMatrix).normalize();
+        const z_coords = triVerticesLocal.map(v => v.z);
+        let count_selectionZ = 0, count_zero = 0;
+        let vertices_at_selectionZ_indices = [], vertices_at_zero_indices = [];
 
-        const currentV1World = p1_local_face.clone().applyMatrix4(object.matrixWorld);
-        const currentV2World = p2_local_face.clone().applyMatrix4(object.matrixWorld);
-        const currentV3World = p3_local_face.clone().applyMatrix4(object.matrixWorld);
-        const currentFaceVerticesWorldZ = [currentV1World.z, currentV2World.z, currentV3World.z];
-
-        if (currentWorldNormal.distanceTo(worldClickedNormal) < 0.01) { // Tolerance for normal match
-            let sharesZ = clickedFaceVerticesWorldZ.some(zC => currentFaceVerticesWorldZ.some(zCurr => Math.abs(zC - zCurr) < 0.001));
-            if (sharesZ) topFaceVertexIndices.push(i, i + 1, i + 2);
+        for (let j = 0; j < 3; j++) {
+            if (Math.abs(z_coords[j] - selectionZ) < EPSILON_Z) {
+                count_selectionZ++; vertices_at_selectionZ_indices.push(triIndices[j]); // Store original indices
+            }
+            if (Math.abs(z_coords[j] - 0) < EPSILON_Z) {
+                count_zero++; vertices_at_zero_indices.push(triIndices[j]); // Store original indices
+            }
         }
-        const oppositeWorldClickedNormal = worldClickedNormal.clone().negate(); // Calculate once per call
-        if (currentWorldNormal.distanceTo(oppositeWorldClickedNormal) < 0.01) {
-             if (currentFaceVerticesWorldZ.some(z => Math.abs(z - minWorldZForIteration) < 0.015)) { // Z tolerance for bottom
-                bottomFaceVertexIndices.push(i, i + 1, i + 2);
-                bottomFaceWorldZCoords.push(currentV1World.z, currentV2World.z, currentV3World.z);
-             }
+
+        let faceColor = WALL_FACE_COLOR; 
+        let isWallFace = true;
+
+        if (count_selectionZ === 3) {
+            faceColor = TOP_FACE_COLOR; isWallFace = false;
+        } else if (count_zero === 3) {
+            faceColor = BOTTOM_FACE_COLOR; isWallFace = false;
+        } else if (count_selectionZ === 2) { 
+            faceColor = WALL_FACE_COLOR;
+            // Use actual vertex objects from triVerticesLocal for segmentExists
+            const pA = triVerticesLocal[vertices_at_selectionZ_indices[0] % 3]; // Get corresponding vertex from triVerticesLocal
+            const pB = triVerticesLocal[vertices_at_selectionZ_indices[1] % 3];
+            if (!segmentExists(topPerimeterSegmentsLocal, pA, pB, SEGMENT_UNIQUENESS_TOLERANCE_SQ)) {
+                topPerimeterSegmentsLocal.push({ start: pA.clone(), end: pB.clone() });
+            }
+        } else if (count_zero === 2) { 
+            faceColor = WALL_FACE_COLOR;
+            const pA = triVerticesLocal[vertices_at_zero_indices[0] % 3];
+            const pB = triVerticesLocal[vertices_at_zero_indices[1] % 3];
+            if (!segmentExists(bottomPerimeterSegmentsLocal, pA, pB, SEGMENT_UNIQUENESS_TOLERANCE_SQ)) {
+                bottomPerimeterSegmentsLocal.push({ start: pA.clone(), end: pB.clone() });
+            }
+        } // Other cases are walls by default
+
+        colorsAttributeDisplay.setXYZ(triIndices[0], faceColor.r, faceColor.g, faceColor.b);
+        colorsAttributeDisplay.setXYZ(triIndices[1], faceColor.r, faceColor.g, faceColor.b);
+        colorsAttributeDisplay.setXYZ(triIndices[2], faceColor.r, faceColor.g, faceColor.b);
+
+        // Mid-plane intersection for wall faces
+        if (isWallFace && !isNaN(midPlaneZ)) {
+            let pointsOnOrCrossingMidPlane = [];
+            // 1. Check vertices of the triangle
+            triVerticesLocal.forEach(vertex => {
+                if (Math.abs(vertex.z - midPlaneZ) < EPSILON_Z) {
+                    addUniquePoint(pointsOnOrCrossingMidPlane, vertex, POINT_UNIQUENESS_TOLERANCE_SQ);
+                }
+            });
+            // 2. Check edge intersections with midPlaneZ
+            for (let k = 0; k < 3; k++) {
+                const pt1 = triVerticesLocal[k];
+                const pt2 = triVerticesLocal[(k + 1) % 3];
+                const intersectPt = getIntersectionPointLocal(pt1, pt2, midPlaneZ, EPSILON_Z);
+                if (intersectPt) {
+                    addUniquePoint(pointsOnOrCrossingMidPlane, intersectPt, POINT_UNIQUENESS_TOLERANCE_SQ);
+                }
+            }
+
+            if (pointsOnOrCrossingMidPlane.length === 2) {
+                if (!segmentExists(midPlanePerimeterSegmentsLocal, pointsOnOrCrossingMidPlane[0], pointsOnOrCrossingMidPlane[1], SEGMENT_UNIQUENESS_TOLERANCE_SQ)) {
+                    midPlanePerimeterSegmentsLocal.push({ start: pointsOnOrCrossingMidPlane[0].clone(), end: pointsOnOrCrossingMidPlane[1].clone() });
+                }
+            } else if (pointsOnOrCrossingMidPlane.length === 3) { // Triangle coplanar with mid-plane
+                const p0 = pointsOnOrCrossingMidPlane[0];
+                const p1 = pointsOnOrCrossingMidPlane[1];
+                const p2 = pointsOnOrCrossingMidPlane[2];
+                if (!segmentExists(midPlanePerimeterSegmentsLocal, p0, p1, SEGMENT_UNIQUENESS_TOLERANCE_SQ)) midPlanePerimeterSegmentsLocal.push({ start: p0.clone(), end: p1.clone() });
+                if (!segmentExists(midPlanePerimeterSegmentsLocal, p1, p2, SEGMENT_UNIQUENESS_TOLERANCE_SQ)) midPlanePerimeterSegmentsLocal.push({ start: p1.clone(), end: p2.clone() });
+                if (!segmentExists(midPlanePerimeterSegmentsLocal, p2, p0, SEGMENT_UNIQUENESS_TOLERANCE_SQ)) midPlanePerimeterSegmentsLocal.push({ start: p2.clone(), end: p0.clone() });
+            } // Ignore if 0, 1 or >3 points
         }
     }
-    // console.log("Top faces identified:", topFaceVertexIndices.length / 3);
-    // console.log("Bottom faces identified:", bottomFaceVertexIndices.length / 3);
+    colorsAttributeDisplay.needsUpdate = true;
+    console.log(`MeshProcessor: Unique Segments Local - Top: ${topPerimeterSegmentsLocal.length}, Bottom: ${bottomPerimeterSegmentsLocal.length}, Mid: ${midPlanePerimeterSegmentsLocal.length}`);
 
-    for (let i = 0; i < numVertices; i++) { colorsAttribute.setXYZ(i, WALL_FACE_COLOR.r, WALL_FACE_COLOR.g, WALL_FACE_COLOR.b); }
-    topFaceVertexIndices.forEach(idx => { colorsAttribute.setXYZ(idx, TOP_FACE_COLOR.r, TOP_FACE_COLOR.g, TOP_FACE_COLOR.b); });
-    bottomFaceVertexIndices.forEach(idx => { colorsAttribute.setXYZ(idx, BOTTOM_FACE_COLOR.r, BOTTOM_FACE_COLOR.g, BOTTOM_FACE_COLOR.b); });
-    colorsAttribute.needsUpdate = true;
-    
-    if (object.geometry !== nonIndexedGeometry) { 
-        // console.log("Replacing indexed geometry with non-indexed for coloring.");
-        object.geometry.dispose(); 
-        object.geometry = nonIndexedGeometry; 
-    }
-    
-    // Material is already cloned in _setupNewModel, ensure originalMaterial is reference
-    if (!originalMaterial) { // Should be set by _setupNewModel, but as a fallback:
-        console.warn("originalMaterial not found, creating a default one for vertex coloring.")
-        originalMaterial = object.material.clone(); // This might be the vertexColor material if error
-    }
-
-    object.material = new THREE.MeshPhongMaterial({ 
-        vertexColors: true, 
+    // Update material of currentObject to use vertex colors
+    if (!originalMaterial) { originalMaterial = object.material.clone(); }
+    object.material = new THREE.MeshPhongMaterial({
+        vertexColors: true,
         shininess: originalMaterial.shininess !== undefined ? originalMaterial.shininess : 50,
         specular: originalMaterial.specular ? (originalMaterial.specular.isColor ? originalMaterial.specular.getHex() : 0x111111) : 0x111111,
-        // side: THREE.DoubleSide // Consider if needed for problematic STLs
     });
 
+    // 6. Visualize Perimeters
     if (perimeterVizGroup) {
-        perimeterVizGroup.children.forEach(child => { if (child.geometry) child.geometry.dispose(); if (child.material) child.material.dispose(); });
-        if(perimeterVizGroup.parent) perimeterVizGroup.parent.remove(perimeterVizGroup);
+        perimeterVizGroup.children.forEach(child => { 
+            if (child.geometry) child.geometry.dispose(); 
+            if (child.material) child.material.dispose(); 
+        });
+        if (perimeterVizGroup.parent) perimeterVizGroup.parent.remove(perimeterVizGroup);
         perimeterVizGroup.clear();
     } else {
         perimeterVizGroup = new THREE.Group();
         scene.add(perimeterVizGroup);
     }
 
-    const referenceTopZ = clickedFaceVerticesWorldZ.reduce((acc, z) => acc + z, 0) / clickedFaceVerticesWorldZ.length;
-    processAndVisualizePerimeter(object, nonIndexedGeometry, colorsAttribute, referenceTopZ, 'top', 0xffff00); // Yellow
+    const invRotationQuaternion = rotationQuaternion.clone().invert();
+    const invTranslationVector = new THREE.Vector3(0, 0, minZ); 
+    const transformProcessedLocalToWorld = (localPoint) => {
+        const pointInOriginalLocalSpace = localPoint.clone()
+            .add(invTranslationVector)        
+            .applyQuaternion(invRotationQuaternion); 
+        return pointInOriginalLocalSpace.applyMatrix4(object.matrixWorld); 
+    };
 
-    let referenceBottomZ = NaN;
-    if (bottomFaceWorldZCoords.length > 0) {
-        referenceBottomZ = bottomFaceWorldZCoords.reduce((acc, z) => acc + z, 0) / bottomFaceWorldZCoords.length;
-        processAndVisualizePerimeter(object, nonIndexedGeometry, colorsAttribute, referenceBottomZ, 'bottom', 0xadd8e6); // Light Blue
-    } else {
-        console.log("No bottom face vertices identified for bottom perimeter.");
+    const topPerimeterSegmentsWorld = topPerimeterSegmentsLocal.map(seg => ({
+        start: transformProcessedLocalToWorld(seg.start),
+        end: transformProcessedLocalToWorld(seg.end)
+    }));
+    const bottomPerimeterSegmentsWorld = bottomPerimeterSegmentsLocal.map(seg => ({
+        start: transformProcessedLocalToWorld(seg.start),
+        end: transformProcessedLocalToWorld(seg.end)
+    }));
+    const midPlanePerimeterSegmentsWorld = midPlanePerimeterSegmentsLocal.map(seg => ({
+        start: transformProcessedLocalToWorld(seg.start),
+        end: transformProcessedLocalToWorld(seg.end)
+    }));    
+    
+    if (!object.geometry.boundingSphere) object.geometry.computeBoundingSphere(); 
+    const basePipeRadius = object.geometry.boundingSphere ? Math.max(0.005, object.geometry.boundingSphere.radius * 0.0075) : 0.01;
+
+    // Clear previous perimeters before populating
+    processedPerimeters = { top: [], mid: [], bottom: [] };
+
+    if (topPerimeterSegmentsWorld.length > 0) {
+      visualizePerimeterFromSegments(topPerimeterSegmentsWorld, 0xffff00, "top_new", basePipeRadius, perimeterVizGroup, processedPerimeters.top);
     }
-
-    // --- Mid-Plane Perimeter Logic ---
-    const EPSILON_Z_FOR_MIDPLANE_CHECK = 0.001; // Small tolerance
-    if (!isNaN(referenceTopZ) && !isNaN(referenceBottomZ) && bottomFaceWorldZCoords.length > 0 && topFaceVertexIndices.length > 0) {
-        if (Math.abs(referenceTopZ - referenceBottomZ) > EPSILON_Z_FOR_MIDPLANE_CHECK * 2) { // Ensure there's some thickness
-             const midPlaneZ = (referenceTopZ + referenceBottomZ) / 2.0;
-             console.log("Calculated MidPlane Z for perimeter:", midPlaneZ);
-             processAndVisualizeMidPlanePerimeter(object, nonIndexedGeometry, colorsAttribute, midPlaneZ, 0x00ff00); // Green
-        } else {
-            console.log("Top and Bottom faces are co-planar or very close, skipping mid-plane perimeter.");
-        }
-    } else {
-        console.log("Not enough data for mid-plane perimeter (missing top or bottom faces/reference Z).");
+    if (bottomPerimeterSegmentsWorld.length > 0) {
+      visualizePerimeterFromSegments(bottomPerimeterSegmentsWorld, 0xadd8e6, "bottom_new", basePipeRadius, perimeterVizGroup, processedPerimeters.bottom);
     }
-    // --- End Mid-Plane Perimeter Logic ---
-
-    console.log("Face identification, coloring, and perimeters processed.");
+    if (midPlanePerimeterSegmentsWorld.length > 0) {
+      visualizePerimeterFromSegments(midPlanePerimeterSegmentsWorld, 0x00ff00, "mid_new", basePipeRadius * 0.8, perimeterVizGroup, processedPerimeters.mid);
+    }
+    
+    processedGeometry.dispose(); 
     deactivateFaceSelectionMode();
 }
 
-function getWallFaceTriangles(geometry, colorsAttribute) {
-    const wallFaceTriangles = []; // Stores {v1: Vector3, v2: Vector3, v3: Vector3} in local coords
-    const numVertices = geometry.attributes.position.count;
-    const posAttr = geometry.attributes.position;
+function visualizePerimeterFromSegments(segmentsWorld, tubeColor, perimeterType, basePipeRadius, targetGroup, outputPathStore) {
+    if (segmentsWorld.length === 0) return;
 
-    for (let i = 0; i < numVertices; i += 3) {
-        const v1Idx = i;
-        // Check color of the first vertex of the face
-        if (Math.abs(colorsAttribute.getX(v1Idx) - WALL_FACE_COLOR.r) < 0.001 &&
-            Math.abs(colorsAttribute.getY(v1Idx) - WALL_FACE_COLOR.g) < 0.001 &&
-            Math.abs(colorsAttribute.getZ(v1Idx) - WALL_FACE_COLOR.b) < 0.001) {
-            wallFaceTriangles.push({
-                v1: new THREE.Vector3().fromBufferAttribute(posAttr, v1Idx),
-                v2: new THREE.Vector3().fromBufferAttribute(posAttr, v1Idx + 1),
-                v3: new THREE.Vector3().fromBufferAttribute(posAttr, v1Idx + 2),
-            });
-        }
-    }
-    return wallFaceTriangles;
-}
+    const allPaths = []; 
+    let availableSegments = [...segmentsWorld]; 
+    const stitchToleranceSq = 0.001 * 0.001; 
 
-function processAndVisualizePerimeter(object, geometry, colorsAttribute, referenceZ, perimeterType, tubeColor) {
-    // console.log(`Starting ${perimeterType} perimeter detection... Reference Z: ${referenceZ}`);
-    // const numVertices = geometry.attributes.position.count; // Not directly used, wallFaceTriangles is primary
-    const wallFaceTriangles = getWallFaceTriangles(geometry, colorsAttribute); // Use helper
-
-    // console.log(`Identified ${wallFaceTriangles.length} wall faces for ${perimeterType} perimeter check.`);
-
-    const perimeterEdgesLocal = [];
-    const zTolerance = 0.015; 
-    const epsilonSq = 0.0001 * 0.0001; // For local vertex equality
-
-    wallFaceTriangles.forEach(face => {
-        const vertices = [face.v1, face.v2, face.v3]; // Local coordinates
-        let refZVerticesData = []; // Stores { localVertex: Vector3 }
-
-        vertices.forEach(localVertex => {
-            const worldVertexZ = localVertex.clone().applyMatrix4(object.matrixWorld).z;
-            if (Math.abs(worldVertexZ - referenceZ) < zTolerance) { 
-                refZVerticesData.push({ localVertex });
-            }
-        });
-
-        if (refZVerticesData.length === 2) {
-            const p1Local = refZVerticesData[0].localVertex;
-            const p2Local = refZVerticesData[1].localVertex;
-            
-            let exists = perimeterEdgesLocal.some(edge =>
-                (edge.start.distanceToSquared(p1Local) < epsilonSq && edge.end.distanceToSquared(p2Local) < epsilonSq) ||
-                (edge.start.distanceToSquared(p2Local) < epsilonSq && edge.end.distanceToSquared(p1Local) < epsilonSq)
-            );
-            if (!exists) {
-                perimeterEdgesLocal.push({ start: p1Local, end: p2Local });
-            }
-        }
-    });
-    // console.log(`${perimeterType} perimeter edges (local coords) found: ${perimeterEdgesLocal.length}`);
-
-    if (perimeterEdgesLocal.length === 0) {
-        // console.log(`No ${perimeterType} perimeter edges identified to visualize.`);
-        return;
-    }
-
-    const orderedWorldVertices = [];
-    const availableEdges = [...perimeterEdgesLocal]; 
-    const stitchToleranceSq = 0.001 * 0.001;
-
-    if (availableEdges.length > 0) {
-        let currentEdge = availableEdges.shift();
-        orderedWorldVertices.push(currentEdge.start.clone().applyMatrix4(object.matrixWorld));
-        orderedWorldVertices.push(currentEdge.end.clone().applyMatrix4(object.matrixWorld));
-        
-        let attempts = 0;
-        const maxAttempts = perimeterEdgesLocal.length + 5; 
-        while (availableEdges.length > 0 && attempts < maxAttempts) {
-            let lastVertexWorld = orderedWorldVertices[orderedWorldVertices.length - 1];
-            let foundNext = false;
-            for (let i = 0; i < availableEdges.length; i++) {
-                let nextEdgeLocal = availableEdges[i];
-                let nextStartWorld = nextEdgeLocal.start.clone().applyMatrix4(object.matrixWorld);
-                let nextEndWorld = nextEdgeLocal.end.clone().applyMatrix4(object.matrixWorld);
-                if (lastVertexWorld.distanceToSquared(nextStartWorld) < stitchToleranceSq) {
-                    orderedWorldVertices.push(nextEndWorld); availableEdges.splice(i, 1); foundNext = true; break;
-                } else if (lastVertexWorld.distanceToSquared(nextEndWorld) < stitchToleranceSq) {
-                    orderedWorldVertices.push(nextStartWorld); availableEdges.splice(i, 1); foundNext = true; break;
+    while (availableSegments.length > 0) {
+        let currentPathPoints = [];
+        let initialSegment = availableSegments.shift(); 
+        currentPathPoints.push(initialSegment.start.clone());
+        currentPathPoints.push(initialSegment.end.clone());
+        let pathExtendedInLoop;
+        do {
+            pathExtendedInLoop = false;
+            let lastPoint = currentPathPoints[currentPathPoints.length - 1];
+            for (let i = availableSegments.length - 1; i >= 0; i--) {
+                let segment = availableSegments[i];
+                if (lastPoint.distanceToSquared(segment.start) < stitchToleranceSq) {
+                    currentPathPoints.push(segment.end.clone());
+                    availableSegments.splice(i, 1);
+                    pathExtendedInLoop = true; break; 
+                } else if (lastPoint.distanceToSquared(segment.end) < stitchToleranceSq) {
+                    currentPathPoints.push(segment.start.clone());
+                    availableSegments.splice(i, 1);
+                    pathExtendedInLoop = true; break; 
                 }
             }
-            if (!foundNext) { 
-                // console.warn(`${perimeterType} perimeter stitch incomplete. Remaining edges: ${availableEdges.length}`); 
-                break; 
+            if (pathExtendedInLoop) continue; 
+            let firstPoint = currentPathPoints[0];
+            for (let i = availableSegments.length - 1; i >= 0; i--) {
+                let segment = availableSegments[i];
+                if (firstPoint.distanceToSquared(segment.end) < stitchToleranceSq) {
+                    currentPathPoints.unshift(segment.start.clone()); 
+                    availableSegments.splice(i, 1);
+                    pathExtendedInLoop = true; break; 
+                } else if (firstPoint.distanceToSquared(segment.start) < stitchToleranceSq) {
+                    currentPathPoints.unshift(segment.end.clone()); 
+                    availableSegments.splice(i, 1);
+                    pathExtendedInLoop = true; break; 
+                }
             }
-            attempts++;
-        }
-        // if (attempts >= maxAttempts && availableEdges.length > 0) { /* console.warn(...) */ }
-    }
-    // console.log(`Ordered world vertices for ${perimeterType} perimeter path: ${orderedWorldVertices.length}`);
-
-    if (orderedWorldVertices.length < 2) {
-        // console.log(`Not enough ordered vertices for ${perimeterType} perimeter tube.`);
-        return;
-    }
-
-    const curvePath = new THREE.CurvePath();
-    for (let i = 0; i < orderedWorldVertices.length - 1; i++) {
-        curvePath.add(new THREE.LineCurve3(orderedWorldVertices[i], orderedWorldVertices[i + 1]));
-    }
-
-    if (curvePath.curves.length > 0) {
-        const boundingBox = new THREE.Box3().setFromObject(object);
-        const sizeVec = boundingBox.getSize(new THREE.Vector3());
-        const maxDim = Math.max(sizeVec.x, sizeVec.y, sizeVec.z);
-        const pipeRadius = Math.max(0.01, maxDim * 0.0075); 
-
-        const tubeGeometry = new THREE.TubeGeometry(curvePath, Math.max(2, orderedWorldVertices.length * 2), pipeRadius, 8, false);
-        const tubeMaterial = new THREE.MeshPhongMaterial({ color: tubeColor, emissive: new THREE.Color(tubeColor).multiplyScalar(0.2), side: THREE.DoubleSide });
-        const tubeMesh = new THREE.Mesh(tubeGeometry, tubeMaterial);
-        perimeterVizGroup.add(tubeMesh); // perimeterVizGroup is global and added to scene
-        // console.log(`${perimeterType} perimeter tube created and added to scene.`);
-    }
-}
-
-function processAndVisualizeMidPlanePerimeter(object, geometry, colorsAttribute, midPlaneZ, tubeColor) {
-    console.log(`Starting mid-plane perimeter detection... Mid-Plane Z: ${midPlaneZ}`);
-    const wallFaceTriangles = getWallFaceTriangles(geometry, colorsAttribute);
-    const midPlaneIntersectionEdgesWorld = [];
-    const EPSILON_Z_PLANE = 0.001; // For checking if vertex is on plane
-    const EPSILON_SQUARED = EPSILON_Z_PLANE * EPSILON_Z_PLANE; // For point equality checks
-
-    // Helper to add edge if unique (world coordinates)
-    function addEdgeIfUnique(p_start, p_end, edgeList) {
-        let exists = edgeList.some(edge =>
-            (edge.start.distanceToSquared(p_start) < EPSILON_SQUARED && edge.end.distanceToSquared(p_end) < EPSILON_SQUARED) ||
-            (edge.start.distanceToSquared(p_end) < EPSILON_SQUARED && edge.end.distanceToSquared(p_start) < EPSILON_SQUARED)
-        );
-        if (!exists) {
-            edgeList.push({ start: p_start, end: p_end });
+        } while (pathExtendedInLoop); 
+        if (currentPathPoints.length >= 2) {
+            allPaths.push(currentPathPoints);
+            if (outputPathStore) {
+                // Store a clone of the path points (which are THREE.Vector3)
+                outputPathStore.push(currentPathPoints.map(p => p.clone())); 
+            }
         }
     }
     
-    // Helper to find intersection of an edge (p1w, p2w in world) with planeZ
-    function getIntersectionPointWorld(p1w, p2w, planeZ) {
-        const d1 = p1w.z - planeZ;
-        const d2 = p2w.z - planeZ;
-
-        // If edge is (nearly) on the plane, or both points on same side (and not on plane), no crossing.
-        if ((Math.abs(d1) < EPSILON_Z_PLANE && Math.abs(d2) < EPSILON_Z_PLANE)) return null; 
-        if (d1 * d2 > EPSILON_SQUARED) return null; // strictly same side (non-zero d1,d2)
-
-        // Avoid division by zero for horizontal edge not crossing
-        if (Math.abs(p1w.z - p2w.z) < EPSILON_Z_PLANE) return null; 
-
-        const t = (planeZ - p1w.z) / (p2w.z - p1w.z);
-        
-        // t should be within [0, 1] for segment intersection
-        if (t >= -EPSILON_Z_PLANE && t <= 1.0 + EPSILON_Z_PLANE) { // Allow slight tolerance for t
-           const intersect = p1w.clone().lerp(p2w, t);
-           // Final check that the interpolated point is indeed on the plane
-           if (Math.abs(intersect.z - planeZ) < EPSILON_Z_PLANE * 2) { 
-             return intersect;
-           }
-        }
-        return null;
-    }
-
-    wallFaceTriangles.forEach(face => { // face has v1,v2,v3 local
-        const p_local = [face.v1, face.v2, face.v3];
-        const p_world = p_local.map(p => p.clone().applyMatrix4(object.matrixWorld));
-
-        let pointsOnOrCrossingPlane = []; // Stores unique Vector3 points for this face
-
-        // 1. Add original vertices that are ON the plane
-        p_world.forEach(pv_world => {
-            if (Math.abs(pv_world.z - midPlaneZ) < EPSILON_Z_PLANE) {
-                // Add if not already present (based on distance)
-                if (!pointsOnOrCrossingPlane.find(p => p.distanceToSquared(pv_world) < EPSILON_SQUARED)) {
-                    pointsOnOrCrossingPlane.push(pv_world);
-                }
+    if (allPaths.length === 0 && segmentsWorld.length > 0) {
+        console.warn(`visualizePerimeterFromSegments: Could not form continuous paths for ${perimeterType}. Visualizing individual segments as fallback.`);
+        segmentsWorld.forEach((seg) => {
+            const singleSegmentPath = new THREE.CurvePath();
+            singleSegmentPath.add(new THREE.LineCurve3(seg.start, seg.end));
+            if (singleSegmentPath.curves.length > 0) {
+                const pipeRadius = basePipeRadius * 0.75; 
+                const tubeGeometry = new THREE.TubeGeometry(singleSegmentPath, 1, pipeRadius, 6, false);
+                const tubeMaterial = new THREE.MeshPhongMaterial({ color: tubeColor, emissive: new THREE.Color(tubeColor).multiplyScalar(0.1), side: THREE.DoubleSide });
+                const tubeMesh = new THREE.Mesh(tubeGeometry, tubeMaterial);
+                targetGroup.add(tubeMesh);
             }
         });
+        return;
+    }
 
-        // 2. Add intersection points from edges CROSSING the plane
-        for (let i = 0; i < 3; i++) {
-            const p1_world = p_world[i];
-            const p2_world = p_world[(i + 1) % 3];
-            
-            // Only calculate intersection if edge truly crosses (i.e., endpoints not both on plane already)
-            // and they are on opposite sides.
-            const d1 = p1_world.z - midPlaneZ;
-            const d2 = p2_world.z - midPlaneZ;
-
-            if (!(Math.abs(d1) < EPSILON_Z_PLANE && Math.abs(d2) < EPSILON_Z_PLANE) && (d1 * d2 < -EPSILON_SQUARED) ) { // Check for opposite sides and not flat on plane
-                 const intersect = getIntersectionPointWorld(p1_world, p2_world, midPlaneZ);
-                 if (intersect) {
-                    if (!pointsOnOrCrossingPlane.find(p => p.distanceToSquared(intersect) < EPSILON_SQUARED)) {
-                        pointsOnOrCrossingPlane.push(intersect);
-                    }
-                 }
-            }
+    allPaths.forEach((pathVertices) => {
+        if (pathVertices.length < 2) return;
+        const curvePath = new THREE.CurvePath();
+        for (let j = 0; j < pathVertices.length - 1; j++) {
+            curvePath.add(new THREE.LineCurve3(pathVertices[j], pathVertices[j+1]));
         }
-        
-        // Form segments from the collected points
-        if (pointsOnOrCrossingPlane.length === 2) {
-            addEdgeIfUnique(pointsOnOrCrossingPlane[0], pointsOnOrCrossingPlane[1], midPlaneIntersectionEdgesWorld);
-        } else if (pointsOnOrCrossingPlane.length === 3) {
-            // Triangle is co-planar or formed 3 distinct points (e.g. one vertex on plane, other two cross)
-            // Connect them: P0-P1, P1-P2, P2-P0 if they form a triangle.
-            // However, if it was one vertex on plane (P0) and an edge crossing (P1, P2),
-            // the segments would be P0-P1 and P0-P2 if P1,P2 were endpoints of the crossing segment.
-            // The current collection method might simply list 3 points.
-            // For a robust general case of N points on a plane from a single triangle's intersection,
-            // they should form a line or a part of the triangle.
-            // If 3 points, it's most likely the triangle's vertices are all on the plane.
-            addEdgeIfUnique(pointsOnOrCrossingPlane[0], pointsOnOrCrossingPlane[1], midPlaneIntersectionEdgesWorld);
-            addEdgeIfUnique(pointsOnOrCrossingPlane[1], pointsOnOrCrossingPlane[2], midPlaneIntersectionEdgesWorld);
-            addEdgeIfUnique(pointsOnOrCrossingPlane[2], pointsOnOrCrossingPlane[0], midPlaneIntersectionEdgesWorld);
-            console.warn("Mid-plane: Triangle resulted in 3 intersection/on-plane points. Assuming coplanar and adding its edges.");
-        } else if (pointsOnOrCrossingPlane.length > 3) {
-            console.warn(`Mid-plane: Triangle resulted in ${pointsOnOrCrossingPlane.length} intersection/on-plane points. This is unexpected. Skipping segments for this face.`);
+        if (curvePath.curves.length > 0) {
+            let radiusScale = 1.0;
+            if (perimeterType === "top_new") radiusScale = 1.0;
+            else if (perimeterType === "bottom_new") radiusScale = 0.9;
+            const pipeRadius = Math.max(0.005, basePipeRadius * radiusScale); 
+            const tubularSegmentsCount = curvePath.curves.length; 
+            const radialSegmentsCount = 6; 
+            const tubeGeometry = new THREE.TubeGeometry(curvePath, tubularSegmentsCount, pipeRadius, radialSegmentsCount, false);
+            const tubeMaterial = new THREE.MeshPhongMaterial({ color: tubeColor, emissive: new THREE.Color(tubeColor).multiplyScalar(0.2), side: THREE.DoubleSide });
+            const tubeMesh = new THREE.Mesh(tubeGeometry, tubeMaterial);
+            targetGroup.add(tubeMesh);
         }
-        // if length is 0 or 1, no segment is formed by this triangle alone.
     });
-
-    console.log(`Mid-plane intersection edges (world coords) found: ${midPlaneIntersectionEdgesWorld.length}`);
-    if (midPlaneIntersectionEdgesWorld.length === 0) {
-        console.log("No mid-plane perimeter edges identified to visualize.");
-        return;
-    }
-
-    // Stitch and Visualize (Adapted from processAndVisualizePerimeter)
-    const orderedWorldVertices = [];
-    const availableEdges = [...midPlaneIntersectionEdgesWorld]; 
-    const stitchToleranceSq = 0.001 * 0.001;
-
-    if (availableEdges.length > 0) {
-        let currentEdge = availableEdges.shift();
-        orderedWorldVertices.push(currentEdge.start); // Already world coords
-        orderedWorldVertices.push(currentEdge.end);
-        
-        let attempts = 0;
-        const maxAttempts = midPlaneIntersectionEdgesWorld.length + 5; 
-        while (availableEdges.length > 0 && attempts < maxAttempts) {
-            let lastVertexWorld = orderedWorldVertices[orderedWorldVertices.length - 1];
-            let foundNext = false;
-            for (let i = 0; i < availableEdges.length; i++) {
-                let nextEdge = availableEdges[i]; // start and end are world
-                if (lastVertexWorld.distanceToSquared(nextEdge.start) < stitchToleranceSq) {
-                    orderedWorldVertices.push(nextEdge.end); availableEdges.splice(i, 1); foundNext = true; break;
-                } else if (lastVertexWorld.distanceToSquared(nextEdge.end) < stitchToleranceSq) {
-                    orderedWorldVertices.push(nextEdge.start); availableEdges.splice(i, 1); foundNext = true; break;
-                }
-            }
-            if (!foundNext) { 
-                console.warn(`Mid-plane perimeter stitch incomplete. Remaining edges: ${availableEdges.length}`); 
-                break; 
-            }
-            attempts++;
-        }
-         if (attempts >= maxAttempts && availableEdges.length > 0) {
-            console.warn(`Mid-plane perimeter stitch max attempts reached. Remaining edges: ${availableEdges.length}`);
-        }
-    }
-    
-    console.log(`Ordered world vertices for mid-plane perimeter path: ${orderedWorldVertices.length}`);
-
-    if (orderedWorldVertices.length < 2) {
-        console.log("Not enough ordered vertices for mid-plane perimeter tube.");
-        return;
-    }
-
-    const curvePath = new THREE.CurvePath();
-    for (let i = 0; i < orderedWorldVertices.length - 1; i++) {
-        curvePath.add(new THREE.LineCurve3(orderedWorldVertices[i], orderedWorldVertices[i + 1]));
-    }
-
-    if (curvePath.curves.length > 0) {
-        const boundingBox = new THREE.Box3().setFromObject(object);
-        const sizeVec = boundingBox.getSize(new THREE.Vector3());
-        const maxDim = Math.max(sizeVec.x, sizeVec.y, sizeVec.z);
-        const pipeRadius = Math.max(0.01, maxDim * 0.0085); // Slightly thicker for distinction
-
-        const tubeGeometry = new THREE.TubeGeometry(curvePath, Math.max(2, orderedWorldVertices.length * 2), pipeRadius, 8, false);
-        const tubeMaterial = new THREE.MeshPhongMaterial({ color: tubeColor, emissive: new THREE.Color(tubeColor).multiplyScalar(0.25), side: THREE.DoubleSide });
-        const tubeMesh = new THREE.Mesh(tubeGeometry, tubeMaterial);
-        perimeterVizGroup.add(tubeMesh);
-        console.log("Mid-plane perimeter tube created and added to scene.");
-    } else {
-        if (midPlaneIntersectionEdgesWorld.length > 0) {
-             console.log("No curves generated for mid-plane perimeter tube geometry, though edges were found.");
-        }
-    }
 }
 
 function activateFaceSelectionMode() {
@@ -846,8 +758,116 @@ function resetObjectMaterial(objectToReset) {
         // console.log("Resetting object, deactivating selection mode.");
         deactivateFaceSelectionMode();
     }
+
+    // Clear stored perimeters
+    processedPerimeters = { top: [], mid: [], bottom: [] };
+    if (canvas2D && ctx2D && view2D.style.display === 'block') {
+        // If 2D view is active, clear it
+        ctx2D.clearRect(0, 0, canvas2D.width, canvas2D.height);
+        ctx2D.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--theme-bg-dark').trim() || '#242526';
+        ctx2D.fillRect(0, 0, canvas2D.width, canvas2D.height);
+        draw2DPerimeters(); // Redraw (will show placeholder if no perimeters)
+    }
 }
 
 // Ensure camera's 'up' is Z-up consistently
 if (camera) camera.up.set(0,0,1);
 if (controls) controls.object.up.set(0,0,1); // Also for controls if they manipulate camera directly
+
+function init2DView() {
+    if (!canvas2D) {
+        const canvas = document.getElementById('canvas-2d');
+        if (canvas) {
+            canvas2D = canvas;
+            ctx2D = canvas2D.getContext('2d');
+        } else {
+            console.error("2D Canvas element not found!");
+            return;
+        }
+    }
+    // Ensure canvas dimensions are up-to-date with its CSS-defined size
+    if (canvas2D.width !== canvas2D.clientWidth || canvas2D.height !== canvas2D.clientHeight) {
+        canvas2D.width = canvas2D.clientWidth;
+        canvas2D.height = canvas2D.clientHeight;
+    }
+}
+
+function draw2DPerimeters() {
+    if (!ctx2D || !canvas2D) {
+        console.log("2D context or canvas not ready for drawing.");
+        if (view2D.style.display === 'block') init2DView(); // Try to init if active
+        if (!ctx2D || !canvas2D) return; // Still not ready, exit
+    }
+
+    ctx2D.clearRect(0, 0, canvas2D.width, canvas2D.height);
+    ctx2D.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--theme-bg-dark').trim() || '#242526';
+    ctx2D.fillRect(0, 0, canvas2D.width, canvas2D.height);
+
+    const allPoints = [];
+    ['top', 'mid', 'bottom'].forEach(type => {
+        processedPerimeters[type].forEach(path => {
+            path.forEach(point => allPoints.push(point));
+        });
+    });
+
+    if (allPoints.length === 0) {
+        // console.log("No perimeters to draw in 2D view.");
+        ctx2D.font = "16px Arial";
+        ctx2D.fillStyle = "#cccccc";
+        ctx2D.textAlign = "center";
+        ctx2D.fillText("No perimeters selected or calculated.", canvas2D.width / 2, canvas2D.height / 2);
+        return;
+    }
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    allPoints.forEach(p => {
+        minX = Math.min(minX, p.x);
+        maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y);
+        maxY = Math.max(maxY, p.y);
+    });
+
+    const padding = 20;
+    const availableWidth = canvas2D.width - 2 * padding;
+    const availableHeight = canvas2D.height - 2 * padding;
+    const dataWidth = maxX - minX;
+    const dataHeight = maxY - minY;
+
+    let scale;
+    if (dataWidth === 0 && dataHeight === 0) scale = 1;
+    else if (dataWidth === 0) scale = availableHeight / (dataHeight || 1); // Avoid div by zero if dataHeight is also 0
+    else if (dataHeight === 0) scale = availableWidth / (dataWidth || 1); // Avoid div by zero
+    else scale = Math.min(availableWidth / dataWidth, availableHeight / dataHeight);
+    
+    const offsetX = padding + (availableWidth - dataWidth * scale) / 2 - minX * scale;
+    const offsetY = padding + (availableHeight - dataHeight * scale) / 2 - minY * scale; // Y is typically inverted in canvas
+    // Correcting offsetY for canvas coordinate system (top-left is 0,0)
+    // const offsetY = padding + (availableHeight - dataHeight * scale) / 2 + maxY * scale; // this would flip it vertically
+    // To keep same orientation as 3D view (Y up), we draw from maxY downwards
+    const correctedOffsetY = padding + (availableHeight - dataHeight * scale) / 2 + maxY * scale;
+
+
+    const drawPath = (path, color) => {
+        if (path.length < 2) return;
+        ctx2D.beginPath();
+        const firstPt = path[0];
+        ctx2D.moveTo(firstPt.x * scale + offsetX, canvas2D.height - (firstPt.y * scale + offsetY)); // Invert Y for drawing
+        // Corrected drawing: Use correctedOffsetY and ensure consistent Y inversion
+        ctx2D.moveTo(firstPt.x * scale + offsetX, correctedOffsetY - firstPt.y * scale); 
+
+        for (let i = 1; i < path.length; i++) {
+            const pt = path[i];
+            ctx2D.lineTo(pt.x * scale + offsetX, correctedOffsetY - pt.y * scale);
+        }
+        // Check if it's a closed loop (optional, based on how paths are generated)
+        // For now, assume they are open paths from segments
+        ctx2D.strokeStyle = color;
+        ctx2D.lineWidth = 2;
+        ctx2D.stroke();
+    };
+
+    processedPerimeters.top.forEach(path => drawPath(path, '#FFFF00')); // Yellow
+    processedPerimeters.mid.forEach(path => drawPath(path, '#00FF00')); // Green
+    processedPerimeters.bottom.forEach(path => drawPath(path, '#ADD8E6')); // Light Blue
+}
+

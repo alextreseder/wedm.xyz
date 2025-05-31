@@ -78,15 +78,19 @@
             </div>
         </div>
         <div id="viewport-container">
-            <div id="viewport">
-                <div id="view-3d">3D Viewport (placeholder)</div>
-                <div id="view-2d" style="display:none;">2D Viewport (placeholder)</div>
-                <textarea id="gcode-editor" style="display:none;" placeholder="G-Code will appear here..."></textarea>
+            <div id="view-3d" class="view-panel">
+                <!-- 3D view content will be managed by Three.js -->
+            </div>
+            <div id="view-2d" class="view-panel" style="display: none;">
+                <canvas id="canvas-2d"></canvas>
+            </div>
+            <div id="gcode-editor" class="view-panel" style="display: none;">
+                <textarea placeholder="G-Code will appear here..."></textarea>
             </div>
             <div id="viewport-modes">
                 <button id="mode-3d-btn" class="active">3D</button>
-                <button id="mode-2d-btn">2D</button>
-                <button id="mode-gcode-btn">G-Code</button>
+                <button id="mode-2d-btn" class="view-mode-btn">2D View</button>
+                <button id="mode-gcode-btn" class="view-mode-btn">G-Code</button>
             </div>
         </div>
     </div>
