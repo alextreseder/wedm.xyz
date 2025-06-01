@@ -15,6 +15,10 @@ const loadStlBtn = document.getElementById('load-stl-btn');
 const loadGearBtn = document.getElementById('load-gear-btn');
 const loadLoftBtn = document.getElementById('load-loft-btn');
 const selectTopFaceBtn = document.getElementById('select-top-face-btn');
+const downloadPolylinesBtn = document.getElementById('download-polylines-btn');
+const downloadEdmResultsBtn = document.getElementById('download-edm-results-btn');
+const generatePathsBtn = document.getElementById('generate-paths-btn');
+const clearPathsBtn = document.getElementById('clear-paths-btn');
 const fileInput = document.createElement('input');
 fileInput.type = 'file';
 fileInput.accept = '.stl';
@@ -29,6 +33,7 @@ let currentObject = null;
 let originalMaterial = null; // To store original material for reset
 let axesGroup = new THREE.Group();
 let perimeterVizGroup; // New group for perimeter visualization
+let solutionVizGroup; // New group for 3D solution line visualization
 
 let selectionModeActive = false; // New state for selection mode
 const raycaster = new THREE.Raycaster(); // For face selection
@@ -40,7 +45,132 @@ const BOTTOM_FACE_COLOR = new THREE.Color(0xAFEEEE); // Light Cyan / PaleTurquoi
 const WALL_FACE_COLOR = new THREE.Color(0xFFDAB9); // Light Orange / PeachPuff
 
 let processedPerimeters = { top: [], mid: [], bottom: [] };
+let allSolutions = []; // To store results from EDM CAM algorithm
 let canvas2D, ctx2D;
+
+const buttonsToDisableDuringCalc = [
+    generatePathsBtn, selectTopFaceBtn, 
+    loadStlBtn, loadGearBtn, loadLoftBtn,
+    downloadPolylinesBtn, downloadEdmResultsBtn, clearPathsBtn
+];
+
+// Helper Functions for EDM CAM Algorithm
+
+function normalizeAngleDegrees(angle) {
+    let normalized = angle % 360;
+    if (normalized < 0) {
+        normalized += 360;
+    }
+    return normalized;
+}
+
+function mergeAngleRanges(ranges) {
+    if (!ranges || ranges.length === 0) return [];
+
+    // Normalize all ranges to be within [0, 360) and handle wrap-around
+    const normalizedRanges = [];
+    ranges.forEach(range => {
+        let start = normalizeAngleDegrees(range[0]);
+        let end = normalizeAngleDegrees(range[1]);
+        if (start > end) { // Wraps around 360, e.g., [350, 10]
+            normalizedRanges.push([start, 360]);
+            normalizedRanges.push([0, end]);
+        } else {
+            normalizedRanges.push([start, end]);
+        }
+    });
+
+    if (normalizedRanges.length === 0) return [];
+
+    // Sort ranges by start angle
+    normalizedRanges.sort((a, b) => a[0] - b[0]);
+
+    const merged = [];
+    let currentRange = normalizedRanges[0];
+
+    for (let i = 1; i < normalizedRanges.length; i++) {
+        const nextRange = normalizedRanges[i];
+        if (nextRange[0] <= currentRange[1] + 0.01) { // +0.01 for small overlaps due to precision
+            // Overlapping or adjacent
+            currentRange[1] = Math.max(currentRange[1], nextRange[1]);
+        } else {
+            // Non-overlapping
+            merged.push(currentRange);
+            currentRange = nextRange;
+        }
+    }
+    merged.push(currentRange); // Add the last processed range
+
+    // Final check for merging a range like [355, 360] with [0, 5]
+    // This specific case should already be handled by the split if the input was [355, 5]
+    // However, if we had separate [350,360] and [0,10] from different coarse hits, they might need merging.
+    // The current sort and merge should handle this if they become adjacent after normalization.
+    // E.g. if merged has [..., [350,360]] and [ [0,10], ...]
+    // This specific cross-360 merge is tricky if they are not first and last after sort.
+    // The current logic might not perfectly merge [350, 360] and [0, 10] if they are not sorted to be first/last and adjacent.
+    // For simplicity, let's assume the split and sort mostly covers it.
+    // A more robust solution might explicitly check if merged[0].start === 0 and merged[last].end === 360
+    // and if they are from a wrapped range.
+
+    return merged;
+}
+
+
+// p1, p2 define the first line segment. p3, p4 define the second line segment.
+function lineSegmentIntersection(p1, p2, p3, p4) {
+    const d = (p1.x - p2.x) * (p3.y - p4.y) - (p1.y - p2.y) * (p3.x - p4.x);
+    if (d === 0) return null; // Parallel lines
+
+    const t = ((p1.x - p3.x) * (p3.y - p4.y) - (p1.y - p3.y) * (p3.x - p4.x)) / d;
+    const u = -((p1.x - p2.x) * (p1.y - p3.y) - (p1.y - p2.y) * (p1.x - p3.x)) / d;
+
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+        return {
+            x: p1.x + t * (p2.x - p1.x),
+            y: p1.y + t * (p2.y - p1.y)
+        };
+    }
+    return null; // Intersection point is not within both segments
+}
+
+function getRayPolylineIntersection(rayOrigin, angleDegrees, polylinePoints, isClosed = true) {
+    if (!polylinePoints || polylinePoints.length < 2) return null;
+
+    const angleRadians = angleDegrees * (Math.PI / 180);
+    // Create a very long ray endpoint
+    const rayEndPoint = {
+        x: rayOrigin.x + Math.cos(angleRadians) * 1e6, // 1e6 is effectively infinity for typical scales
+        y: rayOrigin.y + Math.sin(angleRadians) * 1e6
+    };
+
+    let closestIntersection = null;
+    let minDistanceSq = Infinity;
+
+    for (let i = 0; i < polylinePoints.length; i++) {
+        const p1 = polylinePoints[i];
+        const p2 = polylinePoints[(i + 1) % polylinePoints.length];
+
+        if (!isClosed && i === polylinePoints.length - 1) continue; // Don't connect last to first if not closed
+
+        const intersection = lineSegmentIntersection(rayOrigin, rayEndPoint, p1, p2);
+
+        if (intersection) {
+            const dx = intersection.x - rayOrigin.x;
+            const dy = intersection.y - rayOrigin.y;
+            const distanceSq = dx * dx + dy * dy;
+
+            if (distanceSq < minDistanceSq) {
+                minDistanceSq = distanceSq;
+                closestIntersection = {
+                    x: intersection.x,
+                    y: intersection.y,
+                    length: Math.sqrt(distanceSq)
+                };
+            }
+        }
+    }
+    return closestIntersection;
+}
 
 function init3DView() {
     if (!view3DContainer || view3DContainer.dataset.initialized) return;
@@ -84,6 +214,16 @@ function init3DView() {
     // Create initial axes (font parameter removed)
     createAxes(10);
     scene.add(axesGroup);
+
+    // Initialize and add visualization groups
+    if (!perimeterVizGroup) {
+        perimeterVizGroup = new THREE.Group();
+        scene.add(perimeterVizGroup);
+    }
+    if (!solutionVizGroup) { // Initialize and add the new group
+        solutionVizGroup = new THREE.Group();
+        scene.add(solutionVizGroup);
+    }
 
     view3DContainer.addEventListener('click', onMouseClickForSelection, false);
 
@@ -295,12 +435,12 @@ function onWindowResize() {
         renderer.setSize(width, height);
     }
     if (canvas2D && ctx2D && view2D.style.display !== 'none') {
-        // Ensure canvas logical size matches display size
         if (canvas2D.width !== canvas2D.clientWidth || canvas2D.height !== canvas2D.clientHeight) {
             canvas2D.width = canvas2D.clientWidth;
             canvas2D.height = canvas2D.clientHeight;
         }
-        draw2DPerimeters(); // Redraw on resize
+        draw2DPerimeters();
+        drawEDMSolutionLines();
     }
 }
 window.addEventListener('resize', onWindowResize);
@@ -317,10 +457,11 @@ function setActiveView(viewToShow, btnToActivate, title) {
         viewToShow.style.display = 'block';
         if (viewToShow.id === 'view-3d') {
             init3DView();
-            onWindowResize(); // Ensure 3D canvas is sized correctly
+            onWindowResize();
         } else if (viewToShow.id === 'view-2d') {
-            init2DView(); // Initialize 2D canvas and context
-            draw2DPerimeters(); // Draw current perimeters
+            init2DView();
+            draw2DPerimeters();
+            drawEDMSolutionLines();
         }
     }
     if (btnToActivate) btnToActivate.classList.add('active');
@@ -548,17 +689,20 @@ function MeshProcessor(object, selectedFaceObject) {
         specular: originalMaterial.specular ? (originalMaterial.specular.isColor ? originalMaterial.specular.getHex() : 0x111111) : 0x111111,
     });
 
-    // 6. Visualize Perimeters
+    // 6. Visualize Perimeters (Corrected Clearing Logic)
     if (perimeterVizGroup) {
         perimeterVizGroup.children.forEach(child => { 
             if (child.geometry) child.geometry.dispose(); 
             if (child.material) child.material.dispose(); 
         });
-        if (perimeterVizGroup.parent) perimeterVizGroup.parent.remove(perimeterVizGroup);
-        perimeterVizGroup.clear();
+        // DO NOT remove perimeterVizGroup from its parent here.
+        // if (perimeterVizGroup.parent) perimeterVizGroup.parent.remove(perimeterVizGroup); // THIS WAS THE BUG
+        perimeterVizGroup.clear(); // Just clear its children
     } else {
+        // This else block should ideally not be hit if init3DView correctly sets up perimeterVizGroup.
+        console.warn("MeshProcessor: perimeterVizGroup was null, re-initializing.");
         perimeterVizGroup = new THREE.Group();
-        scene.add(perimeterVizGroup);
+        if(scene) scene.add(perimeterVizGroup); // Add to scene if scene exists
     }
 
     const invRotationQuaternion = rotationQuaternion.clone().invert();
@@ -585,10 +729,7 @@ function MeshProcessor(object, selectedFaceObject) {
     
     if (!object.geometry.boundingSphere) object.geometry.computeBoundingSphere(); 
     const basePipeRadius = object.geometry.boundingSphere ? Math.max(0.005, object.geometry.boundingSphere.radius * 0.0075) : 0.01;
-
-    // Clear previous perimeters before populating
-    processedPerimeters = { top: [], mid: [], bottom: [] };
-
+    processedPerimeters = { top: [], mid: [], bottom: [] }; // Clear before populating
     if (topPerimeterSegmentsWorld.length > 0) {
       visualizePerimeterFromSegments(topPerimeterSegmentsWorld, 0xffff00, "top_new", basePipeRadius, perimeterVizGroup, processedPerimeters.top);
     }
@@ -726,6 +867,48 @@ if (selectTopFaceBtn) {
     selectTopFaceBtn.addEventListener('click', handleSelectTopFaceButtonClick); // NEW
 }
 
+if (downloadPolylinesBtn) {
+    downloadPolylinesBtn.addEventListener('click', handleDownloadPolylines);
+}
+
+if (downloadEdmResultsBtn) {
+    downloadEdmResultsBtn.addEventListener('click', handleDownloadEDMResults);
+}
+
+if (generatePathsBtn) {
+    generatePathsBtn.addEventListener('click', async () => { // Make event handler async
+        if (!currentObject || !processedPerimeters.top.length || !processedPerimeters.mid.length || !processedPerimeters.bottom.length) {
+            alert("Please load an STL, select a top face (which calculates perimeters), and ensure all three perimeters (top, mid, bottom) are available before generating EDM paths.");
+            return;
+        }
+        // console.log("Starting EDM CAM path calculation..."); // Moved inside the async function
+        await calculateAndVisualizeEDMPaths(); // Await the async calculation
+    });
+}
+
+if (clearPathsBtn) {
+    clearPathsBtn.addEventListener('click', () => {
+        console.log("Clearing EDM solutions and perimeters visualisations, and redrawing 2D view.");
+        allSolutions = [];
+        // Clear 2D canvas first
+        if (ctx2D && canvas2D && view2D.style.display === 'block') {
+            draw2DPerimeters(); // Redraws perimeters, effectively clearing old solution lines if any drawn on top
+        }
+        // Clear 3D solution visualizations
+        if (solutionVizGroup) {
+            solutionVizGroup.children.forEach(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            });
+            solutionVizGroup.clear();
+        }
+        // Optionally, if "Clear Paths" should also clear the base perimeters from MeshProcessor:
+        // processedPerimeters = { top: [], mid: [], bottom: [] };
+        // if (perimeterVizGroup) { /* clear perimeterVizGroup too */ }
+        // if (currentObject) { resetObjectMaterial(currentObject); } // This would also clear face colors
+    });
+}
+
 // Modify loadSTLFromFilePath and loadSTL to reset face colors
 function resetObjectMaterial(objectToReset) {
     if (objectToReset && originalMaterial) {
@@ -753,6 +936,14 @@ function resetObjectMaterial(objectToReset) {
         if (perimeterVizGroup.parent) perimeterVizGroup.parent.remove(perimeterVizGroup);
         perimeterVizGroup.clear(); 
     }
+    if (solutionVizGroup) { // Clear 3D solution visualizations
+        solutionVizGroup.children.forEach(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) child.material.dispose();
+        });
+        if (solutionVizGroup.parent) solutionVizGroup.parent.remove(solutionVizGroup);
+        solutionVizGroup.clear();
+    }
 
     if (selectionModeActive) {
         // console.log("Resetting object, deactivating selection mode.");
@@ -761,12 +952,11 @@ function resetObjectMaterial(objectToReset) {
 
     // Clear stored perimeters
     processedPerimeters = { top: [], mid: [], bottom: [] };
+    allSolutions = []; // Clear EDM solutions
+
     if (canvas2D && ctx2D && view2D.style.display === 'block') {
-        // If 2D view is active, clear it
-        ctx2D.clearRect(0, 0, canvas2D.width, canvas2D.height);
-        ctx2D.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--theme-bg-dark').trim() || '#242526';
-        ctx2D.fillRect(0, 0, canvas2D.width, canvas2D.height);
-        draw2DPerimeters(); // Redraw (will show placeholder if no perimeters)
+        draw2DPerimeters(); // This will clear and draw placeholder or empty perimeters
+        // drawEDMSolutionLines(); // Not needed here as allSolutions is empty
     }
 }
 
@@ -869,5 +1059,338 @@ function draw2DPerimeters() {
     processedPerimeters.top.forEach(path => drawPath(path, '#FFFF00')); // Yellow
     processedPerimeters.mid.forEach(path => drawPath(path, '#00FF00')); // Green
     processedPerimeters.bottom.forEach(path => drawPath(path, '#ADD8E6')); // Light Blue
+}
+
+function formatPolylinesForDownload() {
+    let content = "";
+
+    const formatSection = (sectionName, paths) => {
+        if (paths.length > 0) {
+            content += sectionName + "\n";
+            paths.forEach(path => {
+                path.forEach(point => {
+                    // Format to a reasonable number of decimal places, e.g., 4
+                    content += point.x.toFixed(4) + " " + point.y.toFixed(4) + "\n";
+                });
+                // Add a separator if a section has multiple paths, though currently each section has one array of paths.
+                // If a single section (e.g. top) could have disjoint loops, this might be useful.
+                // For now, each "path" in processedPerimeters.top is an array of points for ONE polyline.
+                // If processedPerimeters.top could be [ [p1,p2,...], [pA,pB,...] ] for two separate top loops,
+                // then we might want a separator here. Current structure implies one list of paths per type.
+            });
+        }
+    };
+
+    formatSection("TOP", processedPerimeters.top);
+    formatSection("MIDDLE", processedPerimeters.mid);
+    formatSection("BOTTOM", processedPerimeters.bottom);
+
+    return content;
+}
+
+function handleDownloadPolylines() {
+    const fileContent = formatPolylinesForDownload();
+    if (!fileContent.trim()) {
+        alert("No polylines to download. Please select a top face first to calculate perimeters.");
+        return;
+    }
+
+    const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'polylines.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    console.log("Polyline data download initiated.");
+}
+
+async function calculateAndVisualizeEDMPaths() {
+    let originalButtonText = 'Generate Paths & G-Code';
+    if (generatePathsBtn) originalButtonText = generatePathsBtn.textContent;
+    let transformParams = null; 
+
+    try {
+        buttonsToDisableDuringCalc.forEach(btn => { if(btn) btn.disabled = true; });
+        if (generatePathsBtn) generatePathsBtn.textContent = 'Calculating...';
+        
+        allSolutions = []; 
+        console.log("Starting EDM CAM path calculation...");
+
+        if (view2D.style.display === 'block') {
+            init2DView(); 
+            draw2DPerimeters(); 
+        } else {
+            init2DView(); 
+        }
+        if (canvas2D && ctx2D) { 
+            const allPerimPoints2D = [];
+            ['top', 'mid', 'bottom'].forEach(type => {
+                processedPerimeters[type].forEach(path => {
+                    path.forEach(point => allPerimPoints2D.push(point)); 
+                });
+            });
+            if (allPerimPoints2D.length > 0) {
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                allPerimPoints2D.forEach(p => {
+                    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+                    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+                });
+                const padding = 20;
+                const availableWidth = canvas2D.width - 2 * padding;
+                const availableHeight = canvas2D.height - 2 * padding;
+                const dataWidth = maxX - minX; const dataHeight = maxY - minY;
+                let scale;
+                if (dataWidth === 0 && dataHeight === 0) scale = 1;
+                else if (dataWidth === 0) scale = availableHeight / (dataHeight || 1);
+                else if (dataHeight === 0) scale = availableWidth / (dataWidth || 1);
+                else scale = Math.min(availableWidth / dataWidth, availableHeight / dataHeight);
+                transformParams = {
+                    scale: scale,
+                    offsetX: padding + (availableWidth - dataWidth * scale) / 2 - minX * scale,
+                    correctedOffsetY: padding + (availableHeight - dataHeight * scale) / 2 + maxY * scale,
+                };
+            }
+        }
+
+        const convertPath = (pathArray) => pathArray.map(p => ({ x: p.x, y: p.y }));
+        const topPolyline = processedPerimeters.top.length > 0 ? convertPath(processedPerimeters.top[0]) : null;
+        const middlePolyline = processedPerimeters.mid.length > 0 ? convertPath(processedPerimeters.mid[0]) : null;
+        const bottomPolyline = processedPerimeters.bottom.length > 0 ? convertPath(processedPerimeters.bottom[0]) : null;
+        if (!topPolyline || !middlePolyline || !bottomPolyline) {
+            alert("One or more required perimeters (top, middle, bottom) are missing. Cannot calculate EDM paths.");
+            return; 
+        }
+        if (middlePolyline.length === 0) {
+            alert("Middle perimeter has no points. Cannot calculate EDM paths.");
+            return; 
+        }
+        console.log(`Starting EDM calculation for ${middlePolyline.length} points on the middle perimeter.`);
+        const startTime = performance.now();
+
+        for (const currentOriginPoint of middlePolyline) {
+            let coarseHitThetas = [];
+            for (let coarseTheta = 0; coarseTheta < 360; coarseTheta += 10) {
+                const topIntersection = getRayPolylineIntersection(currentOriginPoint, coarseTheta, topPolyline, true);
+                const bottomIntersection = getRayPolylineIntersection(currentOriginPoint, coarseTheta + 180, bottomPolyline, true);
+                if (topIntersection && bottomIntersection) {
+                    coarseHitThetas.push(coarseTheta);
+                }
+            }
+            if (coarseHitThetas.length > 0) {
+                const potentialRanges = coarseHitThetas.map(theta => [theta - 10, theta + 10]);
+                const validFineScanRanges = mergeAngleRanges(potentialRanges);
+                if (validFineScanRanges.length > 0) {
+                    let pointScanResults = [];
+                    validFineScanRanges.forEach(validRange => {
+                        for (let fineTheta = validRange[0]; fineTheta <= validRange[1]; fineTheta += 0.1) {
+                            const normalizedFineTheta = normalizeAngleDegrees(fineTheta);
+                            const topHit = getRayPolylineIntersection(currentOriginPoint, normalizedFineTheta, topPolyline, true);
+                            const bottomHit = getRayPolylineIntersection(currentOriginPoint, normalizedFineTheta + 180, bottomPolyline, true);
+                            if (topHit && bottomHit) {
+                                const topLength = topHit.length; const bottomLength = bottomHit.length;
+                                const costValue = Math.abs(topLength - bottomLength) + Math.max(topLength, bottomLength);
+                                pointScanResults.push({ angle: normalizedFineTheta, cost: costValue, topLength: topLength, bottomLength: bottomLength, topPoint: {x: topHit.x, y: topHit.y}, bottomPoint: {x: bottomHit.x, y: bottomHit.y}});
+                            }
+                        }
+                    });
+                    if (pointScanResults.length > 0) {
+                        let minCostData = pointScanResults.reduce((min, current) => (current.cost < min.cost ? current : min), pointScanResults[0]);
+                        const newSolution = { origin: currentOriginPoint, theta: minCostData.angle, topPoint: minCostData.topPoint, bottomPoint: minCostData.bottomPoint };
+                        allSolutions.push(newSolution);
+                        if (view2D.style.display === 'block' && ctx2D && canvas2D && transformParams) {
+                            drawSingleEDMSolutionLine(newSolution, ctx2D, canvas2D, transformParams);
+                        }
+                    }
+                }
+            }
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+
+        const endTime = performance.now();
+        console.log(`EDM CAM calculation finished in ${(endTime - startTime).toFixed(2)} ms. Found ${allSolutions.length} solutions.`);
+        
+        // After loop, visualize all solutions in 3D
+        if (allSolutions.length > 0) {
+            visualizeEDMSolutionsIn3D();
+        }
+
+    } catch (error) {
+        console.error("Error during EDM CAM calculation:", error);
+        alert("An error occurred during EDM path calculation. See console for details.");
+    } finally {
+        buttonsToDisableDuringCalc.forEach(btn => { if(btn) btn.disabled = false; });
+        if (generatePathsBtn) generatePathsBtn.textContent = originalButtonText;
+    }
+}
+
+function drawSingleEDMSolutionLine(solution, ctx, canvas, transform) {
+    if (!solution || !ctx || !canvas || !transform) return;
+
+    ctx.beginPath();
+    const topPtX = solution.topPoint.x * transform.scale + transform.offsetX;
+    const topPtY = transform.correctedOffsetY - solution.topPoint.y * transform.scale;
+    const bottomPtX = solution.bottomPoint.x * transform.scale + transform.offsetX;
+    const bottomPtY = transform.correctedOffsetY - solution.bottomPoint.y * transform.scale;
+
+    ctx.moveTo(topPtX, topPtY);
+    ctx.lineTo(bottomPtX, bottomPtY);
+
+    ctx.strokeStyle = '#FFFFFF'; // WHITE color
+    ctx.lineWidth = 1.5; 
+    ctx.stroke();
+}
+
+function drawEDMSolutionLines() {
+    if (!ctx2D || !canvas2D || allSolutions.length === 0) {
+        // If called when no solutions (e.g. after clear), this is fine, just exits.
+        return;
+    }
+    
+    // This function now primarily serves to redraw ALL solutions (e.g., on view switch/resize)
+    // It needs to recalculate its own transform parameters or have them passed if we change architecture.
+    // For now, it recalculates, similar to how calculateAndVisualizeEDMPaths sets up its initial transformParams.
+    let currentTransformParams = null;
+    const allPerimPoints = [];
+    ['top', 'mid', 'bottom'].forEach(type => {
+        processedPerimeters[type].forEach(path => {
+            path.forEach(point => allPerimPoints.push(point));
+        });
+    });
+
+    if (allPerimPoints.length > 0) {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        allPerimPoints.forEach(p => {
+            minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+            minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+        });
+        const padding = 20;
+        const availableWidth = canvas2D.width - 2 * padding;
+        const availableHeight = canvas2D.height - 2 * padding;
+        const dataWidth = maxX - minX; const dataHeight = maxY - minY;
+        let scale;
+        if (dataWidth === 0 && dataHeight === 0) scale = 1;
+        else if (dataWidth === 0) scale = availableHeight / (dataHeight || 1);
+        else if (dataHeight === 0) scale = availableWidth / (dataWidth || 1);
+        else scale = Math.min(availableWidth / dataWidth, availableHeight / dataHeight);
+        currentTransformParams = {
+            scale: scale,
+            offsetX: padding + (availableWidth - dataWidth * scale) / 2 - minX * scale,
+            correctedOffsetY: padding + (availableHeight - dataHeight * scale) / 2 + maxY * scale
+        };
+    } else if (allSolutions.length > 0) { // Fallback if no perimeters but solutions exist
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        allSolutions.forEach(sol => {
+            minX = Math.min(minX, sol.topPoint.x, sol.bottomPoint.x);
+            maxX = Math.max(maxX, sol.topPoint.x, sol.bottomPoint.x);
+            minY = Math.min(minY, sol.topPoint.y, sol.bottomPoint.y);
+            maxY = Math.max(maxY, sol.topPoint.y, sol.bottomPoint.y);
+        });
+        if(minX !== Infinity){
+            const padding = 20;
+            const availableWidth = canvas2D.width - 2 * padding;
+            const availableHeight = canvas2D.height - 2 * padding;
+            const dataWidth = maxX - minX; const dataHeight = maxY - minY;
+            let scale;
+            if (dataWidth === 0 && dataHeight === 0) scale = 1;
+            else if (dataWidth === 0) scale = availableHeight / (dataHeight || 1);
+            else if (dataHeight === 0) scale = availableWidth / (dataWidth || 1);
+            else scale = Math.min(availableWidth / dataWidth, availableHeight / dataHeight);
+            currentTransformParams = {
+                scale: scale,
+                offsetX: padding + (availableWidth - dataWidth * scale) / 2 - minX * scale,
+                correctedOffsetY: padding + (availableHeight - dataHeight * scale) / 2 + maxY * scale
+            };
+        }
+    }
+
+    if (!currentTransformParams) {
+        // console.log("drawEDMSolutionLines: No transform parameters, cannot draw.");
+        return; // Cannot draw without transform parameters
+    }
+    
+    // Draw all solutions using the just-calculated or fallback transform
+    allSolutions.forEach(solution => {
+        // Call the single line drawing function for each
+        drawSingleEDMSolutionLine(solution, ctx2D, canvas2D, currentTransformParams);
+    });
+}
+
+function handleDownloadEDMResults() {
+    if (allSolutions.length === 0) {
+        alert("No EDM CAM results to download. Please generate paths first.");
+        return;
+    }
+    let content = "TOP\n";
+    allSolutions.forEach(sol => {
+        content += `${sol.bottomPoint.x.toFixed(4)} ${sol.bottomPoint.y.toFixed(4)} ${sol.topPoint.x.toFixed(4)} ${sol.topPoint.y.toFixed(4)}\n`;
+    });
+    content += "BOTTOM\n";
+    allSolutions.forEach(sol => {
+        content += `${sol.bottomPoint.x.toFixed(4)} ${sol.bottomPoint.y.toFixed(4)} ${sol.topPoint.x.toFixed(4)} ${sol.topPoint.y.toFixed(4)}\n`;
+    });
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'edm_cam_results.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    console.log("EDM CAM results download initiated.");
+}
+
+function visualizeEDMSolutionsIn3D() {
+    if (!solutionVizGroup || !currentObject || !currentObject.geometry) {
+        console.warn("Cannot visualize 3D EDM solutions: Missing group or current object.");
+        return;
+    }
+    solutionVizGroup.children.forEach(child => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+    });
+    solutionVizGroup.clear();
+    if (allSolutions.length === 0) return;
+    let worldTopZ, worldBottomZ;
+    if (processedPerimeters.top.length > 0 && processedPerimeters.top[0].length > 0) {
+        worldTopZ = processedPerimeters.top[0][0].z;
+    } else {
+        console.warn("Cannot determine worldTopZ for 3D EDM solutions. Top perimeter missing. Using currentObject bounds.");
+        const box = new THREE.Box3().setFromObject(currentObject);
+        worldTopZ = box.max.z; 
+    }
+    if (processedPerimeters.bottom.length > 0 && processedPerimeters.bottom[0].length > 0) {
+        worldBottomZ = processedPerimeters.bottom[0][0].z;
+    } else {
+        console.warn("Cannot determine worldBottomZ for 3D EDM solutions. Bottom perimeter missing. Using currentObject bounds.");
+        const box = new THREE.Box3().setFromObject(currentObject);
+        worldBottomZ = box.min.z;
+    }
+    if (!currentObject.geometry.boundingSphere) currentObject.geometry.computeBoundingSphere();
+    const pipeRadius = currentObject.geometry.boundingSphere ? Math.max(0.005, currentObject.geometry.boundingSphere.radius * 0.0075) : 0.01;
+    const tubularSegments = 8; 
+    const radialSegments = 6;
+
+    // Modified material for brighter white pipes
+    const material = new THREE.MeshPhongMaterial({
+        color: 0xffffff, 
+        emissive: 0x222222, // Add a slight emissive component for brightness
+        side: THREE.DoubleSide 
+    });
+
+    allSolutions.forEach(solution => {
+        const startVec = new THREE.Vector3(solution.topPoint.x, solution.topPoint.y, worldTopZ);
+        const endVec = new THREE.Vector3(solution.bottomPoint.x, solution.bottomPoint.y, worldBottomZ);
+        if (startVec.distanceToSquared(endVec) < 0.0001) return;
+        const curve = new THREE.LineCurve3(startVec, endVec);
+        const tubeGeometry = new THREE.TubeGeometry(curve, tubularSegments, pipeRadius, radialSegments, false);
+        const tubeMesh = new THREE.Mesh(tubeGeometry, material.clone()); 
+        solutionVizGroup.add(tubeMesh);
+    });
+    console.log(`Added ${solutionVizGroup.children.length} EDM solution pipes to 3D view.`);
 }
 
