@@ -155,6 +155,22 @@ function downloadPerimetersAsText() {
     URL.revokeObjectURL(url);
 }
 
+async function loadSTLFromURL(url, filename) {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch STL: ${response.statusText}`);
+        }
+        const blob = await response.blob();
+        const file = new File([blob], filename, { type: 'application/vnd.ms-pki.stl' });
+        cornerSolutions = []; // Clear old solutions
+        THREE_VIEWER.loadSTL(file);
+    } catch (error) {
+        console.error('Error loading STL from URL:', error);
+        alert(`Could not load test case from ${url}. See console for details.`);
+    }
+}
+
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
     THREE_VIEWER.init(); // Initialize the 3D viewer
@@ -174,6 +190,14 @@ document.addEventListener('DOMContentLoaded', () => {
             cornerSolutions = []; // Clear old solutions
             THREE_VIEWER.loadSTL(file);
         }
+    });
+
+    // Test case loaders
+    document.getElementById('load-gear-btn').addEventListener('click', () => {
+        loadSTLFromURL('/public/gear.stl', 'gear.stl');
+    });
+    document.getElementById('load-loft-btn').addEventListener('click', () => {
+        loadSTLFromURL('/public/loft.stl', 'loft.stl');
     });
 
     // Perimeter download listener
