@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WEDM.XYZ - 4 Axis CAM</title>
+    <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+    <div id="app">
+        <div id="sidebar">
+            <h1>
+                <img src="/favicon.ico" alt="WEDM.XYZ Logo" class="title-logo">
+                <a href="https://github.com/alextreseder/wedm.xyz" target="_blank"><span class="brand-blue">WEDM.XYZ</span><span class="tagline-white"> - 4 axis CAM</span></a>
+            </h1>
+
+            <div class="sidebar-section">
+                <h2>USER INPUT FIELDS</h2>
+                <label for="bottom-guide-z-offset">Bottom Guide Z Offset:</label>
+                <input type="number" id="bottom-guide-z-offset" value="0">
+
+                <label for="top-guide-z-position">Top Guide Z Position:</label>
+                <input type="number" id="top-guide-z-position" value="10">
+
+                <label for="wire-diameter">Wire Diameter:</label>
+                <input type="number" id="wire-diameter" value="0.25" step="0.01">
+            </div>
+
+            <div class="sidebar-section">
+                <h2>Object Interaction</h2>
+                <button id="select-top-face-btn">Select Top Face</button>
+            </div>
+
+            <div class="sidebar-section">
+                <h2>ADVANCED</h2>
+                <label for="corner-angle-threshold">Corner Angle Threshold (°):</label>
+                <input type="number" id="corner-angle-threshold" value="150" step="1">
+                
+                <label for="top-face-offset">Top Face Offset:</label>
+                <input type="number" id="top-face-offset" value="0">
+
+                <label for="bottom-face-offset">Bottom Face Offset:</label>
+                <input type="number" id="bottom-face-offset" value="0">
+            </div>
+
+            <div class="sidebar-section">
+                <h2>MANUAL</h2>
+                <button id="select-lead-in-btn">Select Lead In</button>
+                <button id="select-sync-points-btn">Select Sync Points</button>
+            </div>
+
+            <div class="sidebar-section">
+                <h2>Generate</h2>
+                <button id="generate-paths-btn">Generate Paths & G-Code</button>
+                <button id="calculate-perimeters-btn">Calculate Perimeters</button>
+                <button id="download-polylines-btn">Download Polylines</button>
+                <button id="download-edm-results-btn">Download EDM Results</button>
+                <button id="clear-paths-btn" class="secondary">Clear Paths</button>
+            </div>
+            
+            <!-- Old buttons, to be removed or integrated if still needed -->
+            <!-- <button id="select-top-face-btn">Select Top Face</button> -->
+            <!-- <button id="select-lead-in-btn">Select Lead In</button> -->
+        </div>
+
+        <div id="main-content">
+            <div id="top-bar">
+                <div class="dropdown-container">
+                    <div class="dropdown-header">Toggle Viewport</div>
+                    <div class="dropdown-content">
+                        <button id="mode-3d-btn" class="view-mode-btn">3D</button>
+                        <button id="mode-2d-btn" class="view-mode-btn">2D View</button>
+                        <button id="mode-gcode-btn" class="view-mode-btn">G-Code</button>
+                    </div>
+                </div>
+                <div class="dropdown-container">
+                    <div class="dropdown-header">Toggle Visibility</div>
+                    <div class="dropdown-content">
+                        <button id="toggle-mesh-btn" class="toggle-btn active">Mesh</button>
+                        <button id="toggle-mesh-lines-btn" class="toggle-btn active">Mesh Lines</button>
+                        <button id="toggle-perimeters-btn" class="toggle-btn active">Perimeters</button>
+                        <button id="toggle-endpoints-btn" class="toggle-btn active">Endpoints</button>
+                        <button id="toggle-solutions-btn" class="toggle-btn active">Solutions</button>
+                    </div>
+                </div>
+                <div class="dropdown-container">
+                    <div class="dropdown-header">Import Work</div>
+                    <div class="dropdown-content">
+                        <button id="load-gear-btn">Load Test Case (Gear)</button>
+                        <button id="load-loft-btn">Load Test Case (Loft)</button>
+                        <button id="load-stl-btn">Load STL (Optional)</button>
+                    </div>
+                </div>
+            </div>
+            <div id="viewport-container">
+                <div id="view-3d" class="view-panel">
+                    <!-- 3D view content will be managed by Three.js -->
+                </div>
+                <div id="gcode-editor" class="view-panel" style="display: none;">
+                    <textarea placeholder="G-Code will appear here..."></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+    <input type="file" id="stl-file-input" style="display: none;" accept=".stl">
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
