@@ -1,8 +1,15 @@
 import * as THREE_VIEWER from './three-viewer.js';
 import { topPerimeter, bottomPerimeter, middlePerimeter } from './three-viewer.js';
-import { generateCornerSolutions } from './CAM.js';
+import { calculateSyncSolutions } from './CAM.js';
+import { generateGCode } from './GCODE.js';
+import * as SIMULATOR from './Simulate.js';
 
-let cornerSolutions = [];
+let camSolutions = {
+    solutionLines: [],
+    modifiedTopPerimeter: null,
+    modifiedBottomPerimeter: null,
+    syncPairs: []
+};
 
 // View switching logic
 const view3dPanel = document.getElementById('view-3d');
@@ -96,53 +103,39 @@ function setupSelectionButtons() {
  * Formats and triggers a download of the calculated perimeters.
  */
 function downloadPerimetersAsText() {
-    const { 
-        topPerimeter, 
-        upperQuarterPerimeter, 
-        middlePerimeter, 
-        lowerQuarterPerimeter, 
-        bottomPerimeter 
-    } = THREE_VIEWER;
+    const { modifiedTopPerimeter, modifiedBottomPerimeter, syncPairs } = camSolutions;
 
-    if ([topPerimeter, upperQuarterPerimeter, middlePerimeter, lowerQuarterPerimeter, bottomPerimeter].every(p => p.length === 0)) {
+    const top = modifiedTopPerimeter || THREE_VIEWER.topPerimeter;
+    const bottom = modifiedBottomPerimeter || THREE_VIEWER.bottomPerimeter;
+
+    if (top.length === 0 || bottom.length === 0) {
         alert('No perimeters calculated. Use the "Select Top Face" tool first.');
         return;
     }
 
-    const formatSection = (name, perimeters) => {
-        const header = name;
-        if (!perimeters || perimeters.length === 0) {
-            return `${header}\n`;
+    // 1. Format Top Perimeter
+    const formatPolyline = (name, polyline) => {
+        if (!polyline || polyline.length === 0 || polyline[0].length === 0) {
+            return `${name}\n`;
         }
-        // Flatten all points from all polylines into a single list of "x,y" strings
-        const pointsString = perimeters
-            .map(polyline => 
-                polyline.map(point => `${point[0].toFixed(6)},${point[1].toFixed(6)}`).join('\n')
-            )
-            .join('\n'); // Join points from different polylines in the same section
-        return `${header}\n${pointsString}`;
+        const pointsString = polyline[0].map(p => `${p[0].toFixed(6)},${p[1].toFixed(6)},${p[2].toFixed(6)}`).join('\n');
+        return `${name}\n${pointsString}`;
     };
 
-    let fileContent = [
-        formatSection('TOP', THREE_VIEWER.topPerimeter),
-        formatSection('UPPER', THREE_VIEWER.upperQuarterPerimeter),
-        formatSection('MIDDLE', THREE_VIEWER.middlePerimeter),
-        formatSection('LOWER', THREE_VIEWER.lowerQuarterPerimeter),
-        formatSection('BOTTOM', THREE_VIEWER.bottomPerimeter)
-    ].join('\n\n');
+    // 2. Format Sync Pairs
+    const formatSyncPairs = (pairs) => {
+        if (!pairs || pairs.length === 0) {
+            return "SYNC_PAIRS\n";
+        }
+        const pairsString = pairs.map(pair => `${pair[0]},${pair[1]}`).join('\n');
+        return `SYNC_PAIRS\n${pairsString}`;
+    };
 
-    if (cornerSolutions.length > 0) {
-        fileContent += '\n\n\n--- CORNER SOLUTIONS ---\n';
-        cornerSolutions.forEach(sol => {
-            fileContent += `\n\nMIDDLE_VERTEX_INDEX: ${sol.middleVertexIndex}\n`;
-            if (sol.solutionLine) {
-                const { startPoint, endPoint } = sol.solutionLine;
-                fileContent += `SOLUTION_LINE:\n`;
-                fileContent += `  start: ${startPoint.x.toFixed(6)}, ${startPoint.y.toFixed(6)}, ${startPoint.z.toFixed(6)}\n`;
-                fileContent += `  end:   ${endPoint.x.toFixed(6)}, ${endPoint.y.toFixed(6)}, ${endPoint.z.toFixed(6)}\n`;
-            }
-        });
-    }
+    const fileContent = [
+        formatPolyline('TOP_PERIMETER', top),
+        formatPolyline('BOTTOM_PERIMETER', bottom),
+        formatSyncPairs(syncPairs)
+    ].join('\n\n');
 
     const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -163,7 +156,7 @@ async function loadSTLFromURL(url, filename) {
         }
         const blob = await response.blob();
         const file = new File([blob], filename, { type: 'application/vnd.ms-pki.stl' });
-        cornerSolutions = []; // Clear old solutions
+        camSolutions = { solutionLines: [], modifiedTopPerimeter: null, modifiedBottomPerimeter: null, syncPairs: [] };
         THREE_VIEWER.loadSTL(file);
     } catch (error) {
         console.error('Error loading STL from URL:', error);
@@ -174,6 +167,7 @@ async function loadSTLFromURL(url, filename) {
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
     THREE_VIEWER.init(); // Initialize the 3D viewer
+    SIMULATOR.setupSimulator(THREE_VIEWER.updateWireGuides);
     setActiveView('3D'); // Set initial view
     setupToggleButtons(); // Initialize toggle buttons
     setupSelectionButtons(); // Initialize selection buttons
@@ -187,17 +181,17 @@ document.addEventListener('DOMContentLoaded', () => {
     stlFileInput.addEventListener('change', (event) => {
         const file = event.target.files[0];
         if (file) {
-            cornerSolutions = []; // Clear old solutions
+            camSolutions = { solutionLines: [], modifiedTopPerimeter: null, modifiedBottomPerimeter: null, syncPairs: [] };
             THREE_VIEWER.loadSTL(file);
         }
     });
 
     // Test case loaders
     document.getElementById('load-gear-btn').addEventListener('click', () => {
-        loadSTLFromURL('/public/gear.stl', 'gear.stl');
+        loadSTLFromURL('/gear.stl', 'gear.stl');
     });
     document.getElementById('load-loft-btn').addEventListener('click', () => {
-        loadSTLFromURL('/public/loft.stl', 'loft.stl');
+        loadSTLFromURL('/loft.stl', 'loft.stl');
     });
 
     // Perimeter download listener
@@ -212,12 +206,36 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Invalid angle threshold.');
             return;
         }
-        cornerSolutions = generateCornerSolutions(THREE_VIEWER, angleThreshold);
-        THREE_VIEWER.drawCAMSolutions(cornerSolutions); // Visualize solutions
-        if(cornerSolutions.length > 0) {
-            alert(`Found and processed ${cornerSolutions.length} sharp corners.`);
+        camSolutions = calculateSyncSolutions(THREE_VIEWER, angleThreshold);
+        THREE_VIEWER.drawCAMSolutions(camSolutions); // Visualize solutions
+
+        const { modifiedTopPerimeter, modifiedBottomPerimeter, syncPairs } = camSolutions;
+        const gcode = generateGCode(modifiedTopPerimeter, modifiedBottomPerimeter, syncPairs);
+        document.getElementById('gcode-output').value = gcode;
+
+        if (gcode) {
+            const topZ = modifiedTopPerimeter[0][0][2]; // Get Z from the first point of the top perimeter
+            const bottomZ = modifiedBottomPerimeter[0][0][2]; // Get Z from the first point of the bottom perimeter
+            SIMULATOR.loadGCode(gcode, topZ, bottomZ);
+        }
+    });
+
+    // Simulation controls
+    const playPauseBtn = document.getElementById('sim-play-pause-btn');
+    playPauseBtn.addEventListener('click', () => {
+        const { isPlaying, simulationFinished } = SIMULATOR.togglePlayPause();
+        if (simulationFinished) {
+            playPauseBtn.textContent = 'Replay';
         } else {
-            alert('No solutions found for the given parameters.');
+            playPauseBtn.textContent = isPlaying ? 'Pause' : 'Play';
+        }
+    });
+
+    const speedInput = document.getElementById('sim-speed-input');
+    speedInput.addEventListener('change', () => {
+        const speed = parseInt(speedInput.value, 10);
+        if (!isNaN(speed)) {
+            SIMULATOR.setSpeed(speed);
         }
     });
 }); 

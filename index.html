@@ -93,13 +93,21 @@
                         <button id="load-stl-btn">Load STL (Optional)</button>
                     </div>
                 </div>
+                <div class="dropdown-container">
+                    <div class="dropdown-header">Simulation</div>
+                    <div class="dropdown-content">
+                        <button id="sim-play-pause-btn">Play</button>
+                        <label for="sim-speed-input">Speed (lines/sec):</label>
+                        <input type="number" id="sim-speed-input" value="10" min="1" step="1">
+                    </div>
+                </div>
             </div>
             <div id="viewport-container">
                 <div id="view-3d" class="view-panel">
                     <!-- 3D view content will be managed by Three.js -->
                 </div>
                 <div id="gcode-editor" class="view-panel" style="display: none;">
-                    <textarea placeholder="G-Code will appear here..."></textarea>
+                    <textarea id="gcode-output" placeholder="G-Code will appear here..."></textarea>
                 </div>
             </div>
         </div>

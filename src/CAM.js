@@ -156,25 +156,56 @@ function mirrorPolyline(polyline, mirrorPoint) {
     });
 }
 
+function insertPointIntoPolyline(polyline, point, epsilon = 1e-6) {
+    // Check if the point is already a vertex and return its index
+    for (let i = 0; i < polyline.length; i++) {
+        const vertex = polyline[i];
+        if (isClose({x: vertex[0], y: vertex[1], z: vertex[2]}, point, epsilon, true)) {
+            return i;
+        }
+    }
+
+    // Find the segment where the point should be inserted
+    for (let i = 0; i < polyline.length; i++) {
+        const p1 = {x: polyline[i][0], y: polyline[i][1], z: polyline[i][2]};
+        const p2_index = (i + 1) % polyline.length;
+        const p2 = {x: polyline[p2_index][0], y: polyline[p2_index][1], z: polyline[p2_index][2]};
+
+        const distLine = Math.sqrt((p2.x - p1.x)**2 + (p2.y - p1.y)**2 + (p2.z - p1.z)**2);
+        const dist1 = Math.sqrt((point.x - p1.x)**2 + (point.y - p1.y)**2 + (point.z - p1.z)**2);
+        const dist2 = Math.sqrt((point.x - p2.x)**2 + (point.y - p2.y)**2 + (point.z - p2.z)**2);
+        
+        if (Math.abs(dist1 + dist2 - distLine) < epsilon) {
+            polyline.splice(p2_index, 0, [point.x, point.y, point.z]);
+            return p2_index; // Return the index of the newly inserted point
+        }
+    }
+    return -1; // Return -1 if point is not on the polyline
+}
+
+
 /**
  * Generates intersection solutions for sharp corners of a middle perimeter.
  * @param {{topPerimeter: any, upperQuarterPerimeter: any, middlePerimeter: any, lowerQuarterPerimeter: any, bottomPerimeter: any}} perimeters
  * @param {number} angleThreshold The angle to determine a "sharp" corner.
  */
-function generateCornerSolutions({ topPerimeter, upperQuarterPerimeter, middlePerimeter, lowerQuarterPerimeter, bottomPerimeter }, angleThreshold) {
-    const solutions = [];
+function calculateSyncSolutions({ topPerimeter, upperQuarterPerimeter, middlePerimeter, lowerQuarterPerimeter, bottomPerimeter }, angleThreshold) {
+    const solutionLines = [];
+    const syncPairs = [];
 
-    // Assume the first polyline in the array is the one we want to process.
     const middlePoly = middlePerimeter[0]; 
-    if (!middlePoly || middlePoly.length < 3) return [];
+    if (!middlePoly || middlePoly.length < 3) return { solutionLines: [], modifiedTopPerimeter: topPerimeter, modifiedBottomPerimeter: bottomPerimeter, syncPairs: [] };
 
     const bottomPoly = bottomPerimeter[0];
     const lowerPoly = lowerQuarterPerimeter[0];
     const upperPoly = upperQuarterPerimeter[0];
     const topPoly = topPerimeter[0];
 
-    // Check if all required perimeters exist
-    if (!bottomPoly || !lowerPoly || !upperPoly || !topPoly) return [];
+    if (!bottomPoly || !lowerPoly || !upperPoly || !topPoly) return { solutionLines: [], modifiedTopPerimeter: topPerimeter, modifiedBottomPerimeter: bottomPerimeter, syncPairs: [] };
+    
+    // Create copies to modify
+    const modifiedTopPoly = topPoly.map(p => [...p]);
+    const modifiedBottomPoly = bottomPoly.map(p => [...p]);
 
     for (let i = 0; i < middlePoly.length; i++) {
         const p_prev = middlePoly[(i - 1 + middlePoly.length) % middlePoly.length];
@@ -182,6 +213,8 @@ function generateCornerSolutions({ topPerimeter, upperQuarterPerimeter, middlePe
         const p_next = middlePoly[(i + 1) % middlePoly.length];
 
         const angle = getAngle(p_prev, p_curr, p_next);
+
+        if (Math.abs(angle - 180) < 1e-6) continue;
 
         if (angle < angleThreshold) {
             const mirrorPoint = p_curr;
@@ -193,41 +226,60 @@ function generateCornerSolutions({ topPerimeter, upperQuarterPerimeter, middlePe
             const lowerUpperIntersections = findIntersections(mirroredLower, upperPoly);
 
             let bestSolution = null;
+            let minDistance = Infinity;
 
             if (bottomTopIntersections.points.length > 0 && lowerUpperIntersections.points.length > 0) {
-                let minDistanceSq = Infinity;
-
                 bottomTopIntersections.points.forEach(btPoint => {
                     const lineStart = {x: mirrorPoint[0], y: mirrorPoint[1], z: mirrorPoint[2]};
                     const lineEnd = btPoint;
 
                     lowerUpperIntersections.points.forEach(luPoint => {
-                        // Check if luPoint lies on the line segment from mirrorPoint to btPoint
                         const distLine = Math.sqrt((lineEnd.x - lineStart.x)**2 + (lineEnd.y - lineStart.y)**2 + (lineEnd.z - lineStart.z)**2);
                         const dist1 = Math.sqrt((luPoint.x - lineStart.x)**2 + (luPoint.y - lineStart.y)**2 + (luPoint.z - lineStart.z)**2);
                         const dist2 = Math.sqrt((luPoint.x - lineEnd.x)**2 + (luPoint.y - lineEnd.y)**2 + (luPoint.z - lineEnd.z)**2);
 
-                        if (Math.abs(dist1 + dist2 - distLine) < 1e-6) { // Point is on the line segment
-                             if (distLine < minDistanceSq) {
-                                minDistanceSq = distLine;
-                                bestSolution = {
-                                    startPoint: lineStart,
-                                    endPoint: lineEnd
-                                };
+                        if (Math.abs(dist1 + dist2 - distLine) < 1e-6) {
+                             if (distLine < minDistance) {
+                                minDistance = distLine;
+                                bestSolution = lineEnd; // This is the top sync point
                             }
                         }
                     });
                 });
             }
 
-            solutions.push({
-                middleVertexIndex: i,
-                solutionLine: bestSolution
-            });
+            if (bestSolution) {
+                const topSyncPoint = bestSolution;
+                // Unmirror the top sync point to find the bottom sync point
+                const bottomSyncPoint = {
+                    x: 2 * mirrorPoint[0] - topSyncPoint.x,
+                    y: 2 * mirrorPoint[1] - topSyncPoint.y,
+                    z: 2 * mirrorPoint[2] - topSyncPoint.z
+                };
+                
+                solutionLines.push({
+                    startPoint: bottomSyncPoint,
+                    endPoint: topSyncPoint
+                });
+
+                // Insert points into the copied polylines and get their indices
+                const topIndex = insertPointIntoPolyline(modifiedTopPoly, topSyncPoint);
+                const bottomIndex = insertPointIntoPolyline(modifiedBottomPoly, bottomSyncPoint);
+
+                if (topIndex !== -1 && bottomIndex !== -1) {
+                    syncPairs.push([topIndex, bottomIndex]);
+                }
+            }
         }
     }
-    return solutions.filter(s => s.solutionLine !== null);
+    
+    return { 
+        solutionLines, 
+        modifiedTopPerimeter: [modifiedTopPoly], 
+        modifiedBottomPerimeter: [modifiedBottomPoly],
+        syncPairs
+    };
 }
 
 
-export { findIntersections, generateCornerSolutions }; 
+export { findIntersections, calculateSyncSolutions }; 

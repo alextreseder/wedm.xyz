@@ -26,6 +26,9 @@ const perimeterEndpoints = [];
 // --- CAM Visualization ---
 let camSolutionLines;
 
+// --- Simulation Objects ---
+let topWireGuide, bottomWireGuide, wire;
+
 /**
  * Initializes the 3D viewer, scene, camera, and renderer.
  */
@@ -71,6 +74,30 @@ function init() {
     window.addEventListener('resize', onWindowResize);
     container.addEventListener('click', onContainerClick);
     
+    // Create simulation wire guides
+    const guideGeometry = new THREE.ConeGeometry(2, 5, 8);
+    
+    const topGuideMaterial = new THREE.MeshPhongMaterial({ color: 0xffc0cb }); // Pink
+    topWireGuide = new THREE.Mesh(guideGeometry, topGuideMaterial);
+    topWireGuide.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1)); // Point down -Z
+    topWireGuide.visible = false;
+    scene.add(topWireGuide);
+
+    const bottomGuideMaterial = new THREE.MeshPhongMaterial({ color: 0x00ffff }); // Cyan
+    bottomWireGuide = new THREE.Mesh(guideGeometry, bottomGuideMaterial);
+    bottomWireGuide.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)); // Point up +Z
+    bottomWireGuide.visible = false;
+    scene.add(bottomWireGuide);
+
+    // Create the wire
+    const wireGeometry = new THREE.CylinderGeometry(0.1, 0.1, 1, 8); // Radius, height, segments
+    const wireMaterial = new THREE.MeshPhongMaterial({ color: 0xffff00 }); // Yellow
+    wire = new THREE.Mesh(wireGeometry, wireMaterial);
+    // Position wire so it extends from center (0,0,0) to (0,0,1) by default
+    wire.position.set(0, 0, 0.5);
+    wire.visible = false;
+    scene.add(wire);
+
     // Start render loop
     animate();
 }
@@ -307,21 +334,28 @@ function toggleFaceSelectionMode(isActive) {
 
 // --- CAM Visualization ---
 
-function drawCAMSolutions(solutions) {
+function drawCAMSolutions(camData) {
     // Clear previous solutions
     if (camSolutionLines) {
         scene.remove(camSolutionLines);
         camSolutionLines.geometry.dispose();
         camSolutionLines.material.dispose();
     }
+
+    const { modifiedTopPerimeter, modifiedBottomPerimeter, syncPairs } = camData;
     
-    if (!solutions || solutions.length === 0) return;
+    if (!modifiedTopPerimeter || !modifiedBottomPerimeter || !syncPairs || syncPairs.length === 0) return;
+
+    const topPoly = modifiedTopPerimeter[0];
+    const bottomPoly = modifiedBottomPerimeter[0];
 
     const points = [];
-    solutions.forEach(sol => {
-        if (sol.solutionLine) {
-            points.push(new THREE.Vector3(sol.solutionLine.startPoint.x, sol.solutionLine.startPoint.y, sol.solutionLine.startPoint.z));
-            points.push(new THREE.Vector3(sol.solutionLine.endPoint.x, sol.solutionLine.endPoint.y, sol.solutionLine.endPoint.z));
+    syncPairs.forEach(pair => {
+        const topPoint = topPoly[pair[0]];
+        const bottomPoint = bottomPoly[pair[1]];
+        if (topPoint && bottomPoint) {
+            points.push(new THREE.Vector3(...topPoint));
+            points.push(new THREE.Vector3(...bottomPoint));
         }
     });
 
@@ -335,6 +369,43 @@ function drawCAMSolutions(solutions) {
 
 function toggleSolutionsVisibility(visible) {
     if (camSolutionLines) camSolutionLines.visible = visible;
+}
+
+function updateWireGuides(topPosition, bottomPosition) {
+    if (topWireGuide && bottomWireGuide && wire) {
+        if (topPosition && bottomPosition) {
+            const topVec = new THREE.Vector3(topPosition.x, topPosition.y, topPosition.z);
+            const bottomVec = new THREE.Vector3(bottomPosition.x, bottomPosition.y, bottomPosition.z);
+            const coneHeight = 5; // Should match the cone geometry height
+
+            // Position cones so their TIPS are at the target positions
+            topWireGuide.position.copy(topVec).add(new THREE.Vector3(0, 0, coneHeight / 2));
+            bottomWireGuide.position.copy(bottomVec).add(new THREE.Vector3(0, 0, -coneHeight / 2));
+            topWireGuide.visible = true;
+            bottomWireGuide.visible = true;
+
+            // --- Correct Wire Positioning and Orientation ---
+            const distance = topVec.distanceTo(bottomVec);
+            const midpoint = new THREE.Vector3().addVectors(topVec, bottomVec).multiplyScalar(0.5);
+            
+            // Set position to the midpoint
+            wire.position.copy(midpoint);
+            
+            // Scale the wire to the correct length
+            wire.scale.set(1, distance, 1);
+            
+            // Orient the wire to align with the vector between the two points
+            const direction = new THREE.Vector3().subVectors(topVec, bottomVec).normalize();
+            wire.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+            
+            wire.visible = true;
+
+        } else {
+            topWireGuide.visible = false;
+            bottomWireGuide.visible = false;
+            wire.visible = false;
+        }
+    }
 }
 
 
@@ -491,6 +562,7 @@ export {
     toggleEndpointsVisibility,
     toggleSolutionsVisibility,
     drawCAMSolutions,
+    updateWireGuides,
     toggleFaceSelectionMode, 
     setCameraView,
     topPerimeter, 
