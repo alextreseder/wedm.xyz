@@ -29,11 +29,6 @@
             </div>
 
             <div class="sidebar-section">
-                <h2>Object Interaction</h2>
-                <button id="select-top-face-btn">Select Top Face</button>
-            </div>
-
-            <div class="sidebar-section">
                 <h2>ADVANCED</h2>
                 <label for="corner-angle-threshold">Corner Angle Threshold (°):</label>
                 <input type="number" id="corner-angle-threshold" value="150" step="1">
@@ -46,16 +41,20 @@
             </div>
 
             <div class="sidebar-section">
-                <h2>MANUAL</h2>
+                <h2>Object Interaction</h2>
+                <button id="select-top-face-btn">Select Top Face</button>
+                <button id="select-origin-btn">Select Origin</button>
                 <button id="select-lead-in-btn">Select Lead In</button>
-                <button id="select-sync-points-btn">Select Sync Points</button>
+                <button id="select-manual-rulings-btn">Select Manual Rulings</button>
             </div>
 
             <div class="sidebar-section">
                 <h2>Generate</h2>
-                <button id="generate-paths-btn">Generate Paths & G-Code</button>
+                <button id="prepare-surface-btn">Prepare Surface</button>
+                <button id="generate-paths-btn">Generate</button>
                 <button id="calculate-perimeters-btn">Calculate Perimeters</button>
-                <button id="download-polylines-btn">Download Polylines</button>
+                <button id="copy-p0-btn">Copy P0</button>
+                <button id="copy-p1-btn">Copy P1</button>
                 <button id="download-edm-results-btn">Download EDM Results</button>
                 <button id="clear-paths-btn" class="secondary">Clear Paths</button>
             </div>
@@ -79,10 +78,12 @@
                     <div class="dropdown-header">Toggle Visibility</div>
                     <div class="dropdown-content">
                         <button id="toggle-mesh-btn" class="toggle-btn active">Mesh</button>
-                        <button id="toggle-mesh-lines-btn" class="toggle-btn active">Mesh Lines</button>
+                        <button id="toggle-mesh-lines-btn" class="toggle-btn">Mesh Lines</button>
                         <button id="toggle-perimeters-btn" class="toggle-btn active">Perimeters</button>
-                        <button id="toggle-endpoints-btn" class="toggle-btn active">Endpoints</button>
-                        <button id="toggle-solutions-btn" class="toggle-btn active">Solutions</button>
+                        <button id="toggle-rulings-btn" class="toggle-btn active">Rulings</button>
+                        <button id="toggle-stitches-btn" class="toggle-btn active">Stitches</button>
+                        <button id="toggle-kerfs-btn" class="toggle-btn">Kerfs</button>
+                        <button id="toggle-gadget-btn" class="toggle-btn active">Gadget</button>
                     </div>
                 </div>
                 <div class="dropdown-container">

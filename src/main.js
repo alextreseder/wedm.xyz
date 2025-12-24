@@ -1,8 +1,7 @@
 import * as THREE_VIEWER from './three-viewer.js';
-import { topPerimeter, bottomPerimeter, middlePerimeter } from './three-viewer.js';
-import { calculateSyncSolutions } from './CAM.js';
-import { generateGCode } from './GCODE.js';
-import * as SIMULATOR from './Simulate.js';
+// import { calculateSyncSolutions } from './CAM.js';
+// import { generateGCode } from './GCODE.js';
+// import * as SIMULATOR from './Simulate.js';
 
 let camSolutions = {
     solutionLines: [],
@@ -68,10 +67,16 @@ function setupToggleButtons() {
                 THREE_VIEWER.toggleMeshVisibility(newState);
             } else if (button.id === 'toggle-mesh-lines-btn') {
                 THREE_VIEWER.toggleWireframeVisibility(newState);
-            } else if (button.id === 'toggle-endpoints-btn') {
-                THREE_VIEWER.toggleEndpointsVisibility(newState);
-            } else if (button.id === 'toggle-solutions-btn') {
-                THREE_VIEWER.toggleSolutionsVisibility(newState);
+            } else if (button.id === 'toggle-perimeters-btn') {
+                THREE_VIEWER.togglePerimetersVisibility(newState);
+            } else if (button.id === 'toggle-rulings-btn') {
+                THREE_VIEWER.toggleRulingsVisibility(newState);
+            } else if (button.id === 'toggle-stitches-btn') {
+                THREE_VIEWER.toggleStitchesVisibility(newState);
+            } else if (button.id === 'toggle-kerfs-btn') {
+                THREE_VIEWER.toggleKerfsVisibility(newState);
+            } else if (button.id === 'toggle-gadget-btn') {
+                THREE_VIEWER.toggleGadgetVisibility(newState);
             }
         });
     });
@@ -86,66 +91,42 @@ function updateToggleState(button, isActive) {
 }
 
 // Selection button logic
+const selectionButtons = {};
+
 function setupSelectionButtons() {
-    const selectFaceBtn = document.getElementById('select-top-face-btn');
-    selectFaceBtn.addEventListener('click', () => {
-        THREE_VIEWER.toggleFaceSelectionMode(true);
-    });
+    selectionButtons.selectFaceBtn = document.getElementById('select-top-face-btn');
+    selectionButtons.selectOriginBtn = document.getElementById('select-origin-btn');
+    selectionButtons.selectLeadInBtn = document.getElementById('select-lead-in-btn');
+    selectionButtons.selectManualRulingsBtn = document.getElementById('select-manual-rulings-btn');
 
-    // Custom event listener for when selection is done
+    const deactivateAllHighlights = () => {
+        Object.values(selectionButtons).forEach(btn => btn.classList.remove('selection-active'));
+    };
+
+    const setupButton = (button, action) => {
+        button.addEventListener('click', () => {
+            deactivateAllHighlights();
+            button.classList.add('selection-active');
+            action();
+        });
+    };
+
+    setupButton(selectionButtons.selectFaceBtn, () => THREE_VIEWER.toggleFaceSelectionMode(true));
+    setupButton(selectionButtons.selectOriginBtn, () => THREE_VIEWER.toggleVertexSelectionMode(true, 'origin'));
+    setupButton(selectionButtons.selectLeadInBtn, () => THREE_VIEWER.toggleVertexSelectionMode(true, 'lead-in'));
+    setupButton(selectionButtons.selectManualRulingsBtn, () => THREE_VIEWER.toggleVertexSelectionMode(true, 'manual-ruling'));
+
     document.addEventListener('selectionCompleted', () => {
-        // Automatically switch to 2D view after selection -- REMOVED
-        // setActiveView('2D'); 
+        deactivateAllHighlights();
+        // setActiveView('2D'); // Optional: switch view after selection
     }, false);
-}
 
-/**
- * Formats and triggers a download of the calculated perimeters.
- */
-function downloadPerimetersAsText() {
-    const { modifiedTopPerimeter, modifiedBottomPerimeter, syncPairs } = camSolutions;
-
-    const top = modifiedTopPerimeter || THREE_VIEWER.topPerimeter;
-    const bottom = modifiedBottomPerimeter || THREE_VIEWER.bottomPerimeter;
-
-    if (top.length === 0 || bottom.length === 0) {
-        alert('No perimeters calculated. Use the "Select Top Face" tool first.');
-        return;
-    }
-
-    // 1. Format Top Perimeter
-    const formatPolyline = (name, polyline) => {
-        if (!polyline || polyline.length === 0 || polyline[0].length === 0) {
-            return `${name}\n`;
+    window.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            THREE_VIEWER.deactivateAllModes();
+            deactivateAllHighlights();
         }
-        const pointsString = polyline[0].map(p => `${p[0].toFixed(6)},${p[1].toFixed(6)},${p[2].toFixed(6)}`).join('\n');
-        return `${name}\n${pointsString}`;
-    };
-
-    // 2. Format Sync Pairs
-    const formatSyncPairs = (pairs) => {
-        if (!pairs || pairs.length === 0) {
-            return "SYNC_PAIRS\n";
-        }
-        const pairsString = pairs.map(pair => `${pair[0]},${pair[1]}`).join('\n');
-        return `SYNC_PAIRS\n${pairsString}`;
-    };
-
-    const fileContent = [
-        formatPolyline('TOP_PERIMETER', top),
-        formatPolyline('BOTTOM_PERIMETER', bottom),
-        formatSyncPairs(syncPairs)
-    ].join('\n\n');
-
-    const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'polylines.txt';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    });
 }
 
 async function loadSTLFromURL(url, filename) {
@@ -167,7 +148,7 @@ async function loadSTLFromURL(url, filename) {
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
     THREE_VIEWER.init(); // Initialize the 3D viewer
-    SIMULATOR.setupSimulator(THREE_VIEWER.updateWireGuides);
+    // SIMULATOR.setupSimulator(THREE_VIEWER.updateWireGuides);
     setActiveView('3D'); // Set initial view
     setupToggleButtons(); // Initialize toggle buttons
     setupSelectionButtons(); // Initialize selection buttons
@@ -194,32 +175,48 @@ document.addEventListener('DOMContentLoaded', () => {
         loadSTLFromURL('/loft.stl', 'loft.stl');
     });
 
-    // Perimeter download listener
-    const downloadBtn = document.getElementById('download-polylines-btn');
-    downloadBtn.addEventListener('click', downloadPerimetersAsText);
+    // --- Clipboard copy for polylines ---
+    function formatPolylineForDesmos(polyline) {
+        if (!polyline || polyline.length === 0) return '';
+        // Assuming the first polyline in the array is the one we want
+        const points = polyline[0];
+        return points.map(p => `${p[0].toFixed(8)}\t${p[1].toFixed(8)}`).join('\n');
+    }
 
-    // Generate G-Code listener
-    const generateBtn = document.getElementById('generate-paths-btn');
-    generateBtn.addEventListener('click', () => {
-        const angleThreshold = parseFloat(document.getElementById('corner-angle-threshold').value);
-        if (isNaN(angleThreshold)) {
-            alert('Invalid angle threshold.');
+    function copyPolyline(perimeterKey) {
+        if (!THREE_VIEWER.currentPerimeters) {
+            alert("No perimeters calculated yet. Please load a model first.");
             return;
         }
-        camSolutions = calculateSyncSolutions(THREE_VIEWER, angleThreshold);
-        THREE_VIEWER.drawCAMSolutions(camSolutions); // Visualize solutions
-
-        const { modifiedTopPerimeter, modifiedBottomPerimeter, syncPairs } = camSolutions;
-        const gcode = generateGCode(modifiedTopPerimeter, modifiedBottomPerimeter, syncPairs);
-        document.getElementById('gcode-output').value = gcode;
-
-        if (gcode) {
-            const topZ = modifiedTopPerimeter[0][0][2]; // Get Z from the first point of the top perimeter
-            const bottomZ = modifiedBottomPerimeter[0][0][2]; // Get Z from the first point of the bottom perimeter
-            SIMULATOR.loadGCode(gcode, topZ, bottomZ);
+        const polyline = THREE_VIEWER.currentPerimeters[perimeterKey];
+        if (!polyline) {
+            alert(`Perimeter ${perimeterKey} not found.`);
+            return;
         }
+        const textToCopy = formatPolylineForDesmos(polyline);
+        navigator.clipboard.writeText(textToCopy).then(() => {
+            alert(`${perimeterKey} copied to clipboard!`);
+        }).catch(err => {
+            console.error('Failed to copy text: ', err);
+            alert(`Failed to copy ${perimeterKey}. See console for details.`);
+        });
+    }
+
+    document.getElementById('copy-p0-btn').addEventListener('click', () => copyPolyline('P0'));
+    document.getElementById('copy-p1-btn').addEventListener('click', () => copyPolyline('P1'));
+
+    const prepareSurfaceBtn = document.getElementById('prepare-surface-btn');
+    prepareSurfaceBtn.addEventListener('click', () => {
+        THREE_VIEWER.prepareSurface();
+    });
+    
+    const generateBtn = document.getElementById('generate-paths-btn');
+    generateBtn.addEventListener('click', () => {
+        THREE_VIEWER.calculateAndDrawKerf();
     });
 
+
+    /*
     // Simulation controls
     const playPauseBtn = document.getElementById('sim-play-pause-btn');
     playPauseBtn.addEventListener('click', () => {
@@ -238,4 +235,5 @@ document.addEventListener('DOMContentLoaded', () => {
             SIMULATOR.setSpeed(speed);
         }
     });
+    */
 }); 

@@ -156,6 +156,10 @@ button.secondary:hover {
     background-color: #555;
 }
 
+button.selection-active {
+    border: 2px solid #ffffff;
+}
+
 /* Main Content Area */
 #main-content {
     flex-grow: 1;
