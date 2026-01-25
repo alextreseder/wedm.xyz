@@ -10,7 +10,7 @@
 ---
 
 ## 📸 Screenshots
-![Main Interface]((https://github.com/alextreseder/wedm.xyz/blob/main/public/0V01screenshot.png))
+![Main Interface](https://github.com/alextreseder/wedm.xyz/blob/main/public/0V01screenshot.png?raw=true)
 
 ---
 
