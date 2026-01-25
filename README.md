@@ -3,7 +3,7 @@
 ![Version](https://img.shields.io/badge/version-0V01-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-**WEDM.XYZ** is a browser-based Computer-Aided Manufacturing (CAM) tool specifically designed for Wire Electrical Discharge Machining (WEDM). It leverages the power of WebAssembly to run a full CAD kernel directly in the browser, allowing users to import STEP files, configure machining parameters, and generate G-code without installing any local software.
+**WEDM.XYZ** is a browser-based Computer-Aided Manufacturing (CAM) tool specifically designed for 4+1 axis Wire Electrical Discharge Machining (WEDM)
 
 > **UI Inspiration**: The layout and user interface philosophy are heavily inspired by [CascadeStudio](https://github.com/zalo/CascadeStudio), prioritizing a clean, window-based environment for complex 3D engineering tasks.
 
@@ -59,7 +59,7 @@ The application is built on a modern React stack, emphasizing performance and se
 *   [TypeScript](https://www.typescriptlang.org/) - Type Safety
 
 **3D & CAD**
-*   [OpenCascade.js](https://github.com/d এসেছি/opencascade.js) - WebAssembly port of the OpenCascade CAD Kernel
+*   [OpenCascade.js](https://github.com/donalffons/opencascade.js/) - WebAssembly port of the OpenCascade CAD Kernel
 *   [Three.js](https://threejs.org/) - 3D Rendering Engine
 
 **Interface**
