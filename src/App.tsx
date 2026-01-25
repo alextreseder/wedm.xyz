@@ -1,5 +1,6 @@
 import TopBar from './components/TopBar';
 import MainLayout from './components/MainLayout';
+import ErrorBoundary from './components/ErrorBoundary';
 import './style.css';
 
 /**
@@ -8,10 +9,10 @@ import './style.css';
  */
 function App() {
   return (
-    <>
+    <ErrorBoundary>
       <TopBar />
       <MainLayout />
-    </>
+    </ErrorBoundary>
   );
 }
 

@@ -23,6 +23,9 @@ interface ProjectStore extends ProjectState {
     
     // --- Logic Actions ---
     updateTemporalParams: (changedKey: 'on' | 'off' | 'duty' | 'freq') => void;
+
+    // --- G-Code Actions ---
+    setGCodeText: (text: string) => void;
 }
 
 export const useStore = create<ProjectStore>((set, get) => ({
@@ -122,5 +125,14 @@ export const useStore = create<ProjectStore>((set, get) => ({
         set((state) => ({
             params: { ...state.params, spark: newSpark }
         }));
-    }
+    },
+
+    setGCodeText: (text) => set((state) => ({
+        gcode: { 
+            ...state.gcode, 
+            text,
+            lineCount: text.split('\n').length,
+            lastGenerated: Date.now()
+        }
+    }))
 }));
