@@ -59,9 +59,10 @@ const createInstance = (OC: any, className: string, ...args: any[]) => {
  * Converts a STEP file buffer to GLB format.
  * 
  * @param fileBuffer - The ArrayBuffer of the STEP file.
+ * @param linearDeflection - The mesh resolution (smaller is finer).
  * @returns ArrayBuffer containing the GLB data.
  */
-const convertStepToGlb = async (fileBuffer: ArrayBuffer): Promise<ArrayBuffer> => {
+const convertStepToGlb = async (fileBuffer: ArrayBuffer, linearDeflection: number = 1.0): Promise<ArrayBuffer> => {
   const OC = await initOCCT();
   
   const fileName = "import.step";
@@ -97,7 +98,8 @@ const convertStepToGlb = async (fileBuffer: ArrayBuffer): Promise<ArrayBuffer> =
 
     // 4. Mesh the Shape (Essential for visualization)
     // parameters: shape, linear deflection, relative, angular deflection, parallel
-    createInstance(OC, "BRepMesh_IncrementalMesh", shape, 0.1, false, 0.1, false);
+    // We use the provided linearDeflection
+    createInstance(OC, "BRepMesh_IncrementalMesh", shape, linearDeflection, false, 0.5, false);
 
     // 5. Export to GLB
     const cafWriter = createInstance(OC, "RWGltf_CafWriter", createInstance(OC, "TCollection_AsciiString", glbFileName), true);
@@ -137,7 +139,9 @@ ctx.onmessage = async (event: MessageEvent) => {
 
   if (type === 'CONVERT_STEP') {
     try {
-      const glbBuffer = await convertStepToGlb(payload);
+      // payload now contains { buffer, linearDeflection }
+      const { buffer, linearDeflection } = payload;
+      const glbBuffer = await convertStepToGlb(buffer, linearDeflection);
       ctx.postMessage({ type: 'SUCCESS', payload: glbBuffer, id }, [glbBuffer]);
     } catch (error: any) {
       ctx.postMessage({ type: 'ERROR', payload: error.message, id });

@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { convertStepToGlb } from '../services/occtService';
 import { eventBus, EVENTS } from '../utils/eventBus';
+import { useStore } from '../store/useStore';
 
 /**
  * TopBar Component
@@ -30,8 +31,11 @@ const TopBar: React.FC = () => {
       
       console.log('Sending to worker for conversion...');
       
+      // Get current mesh resolution from store
+      const meshResolution = useStore.getState().params.kernel.meshResolution;
+
       // Convert in worker thread (non-blocking)
-      const glbUrl = await convertStepToGlb(buffer);
+      const glbUrl = await convertStepToGlb(buffer, meshResolution);
       
       console.log('Conversion successful, updating scene...');
       eventBus.emit(EVENTS.MODEL_LOADED, glbUrl);

@@ -1,10 +1,16 @@
 import React, { useEffect, useRef } from 'react';
 import { Pane } from 'tweakpane';
 import * as TweakpaneEssentialsPlugin from '@tweakpane/plugin-essentials';
+import { useStore } from '../store/useStore';
+
+import { reprocessCurrentModel } from '../services/occtService';
 
 const ConfigWindow: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<Pane | null>(null);
+  
+  // Ref to hold the debounce timer
+  const debounceTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!containerRef.current || paneRef.current) return;
@@ -30,35 +36,90 @@ const ConfigWindow: React.FC = () => {
       ],
     }) as any;
 
-    // --- CAM Tab ---
-    const camParams = {
-        wireTension: 15,
-        wireSpeed: 50,
-        kerfDiameter: 0.25,
-        numberOfPasses: 1,
-        tolerance: 0.01,
+    // Get initial state (reference for binding)
+    // We bind Tweakpane directly to a proxy object initialized from the store
+    // Updates are pushed to the store via .on('change')
+    const state = useStore.getState();
+    
+    // Create a local mutable object for Tweakpane to bind to
+    // We will sync this with the store
+    const bindingParams = {
+        cam: { ...state.params.cam },
+        spark: { ...state.params.spark },
+        cost: { ...state.params.cost },
+        kernel: { ...state.params.kernel },
+        drill: { ...state.params.drill },
+        units: { ...state.params.units }
     };
 
+    // --- CAM Tab ---
     const camPage = tab.pages[0];
 
-    camPage.addBinding(camParams, 'wireTension', { 
+    // Units Folder
+    const unitsFolder = camPage.addFolder({ title: 'Units', expanded: false });
+    
+    unitsFolder.addButton({ title: 'Change to in' }).on('click', () => {
+        useStore.getState().setUnitSystem('in');
+        console.log('Changed units to inches');
+    });
+    
+    unitsFolder.addButton({ title: 'Change to mm' }).on('click', () => {
+        useStore.getState().setUnitSystem('mm');
+        console.log('Changed units to mm');
+    });
+    
+    unitsFolder.addButton({ title: 'Scale to in' }).on('click', () => {
+        useStore.getState().scaleParams(1/25.4);
+        useStore.getState().setUnitSystem('in');
+        // Refresh UI
+        Object.assign(bindingParams.cam, useStore.getState().params.cam);
+        Object.assign(bindingParams.drill, useStore.getState().params.drill);
+        (pane as any).refresh();
+        console.log('Scaled to inches');
+    });
+    
+    unitsFolder.addButton({ title: 'Scale to mm' }).on('click', () => {
+        useStore.getState().scaleParams(25.4);
+        useStore.getState().setUnitSystem('mm');
+        // Refresh UI
+        Object.assign(bindingParams.cam, useStore.getState().params.cam);
+        Object.assign(bindingParams.drill, useStore.getState().params.drill);
+        (pane as any).refresh();
+        console.log('Scaled to mm');
+    });
+    
+    unitsFolder.addButton({ title: 'Scale 10%' }).on('click', () => {
+        useStore.getState().scaleParams(0.1);
+        Object.assign(bindingParams.cam, useStore.getState().params.cam);
+        Object.assign(bindingParams.drill, useStore.getState().params.drill);
+        (pane as any).refresh();
+    });
+    
+    unitsFolder.addButton({ title: 'Scale 1000%' }).on('click', () => {
+        useStore.getState().scaleParams(10);
+        Object.assign(bindingParams.cam, useStore.getState().params.cam);
+        Object.assign(bindingParams.drill, useStore.getState().params.drill);
+        (pane as any).refresh();
+    });
+
+    camPage.addBinding(bindingParams.cam, 'wireTension', { 
         min: 1, max: 30, 
         label: 'Wire Tension',
         format: (v: number) => `${v.toFixed(1)} N`
-    });
+    }).on('change', (ev: any) => useStore.getState().setCamParam('wireTension', ev.value));
     
-    camPage.addBinding(camParams, 'wireSpeed', { 
+    camPage.addBinding(bindingParams.cam, 'wireSpeed', { 
         min: 1, max: 100, 
         label: 'Wire Speed',
         format: (v: number) => `${v.toFixed(0)} mm/s`
-    });
+    }).on('change', (ev: any) => useStore.getState().setCamParam('wireSpeed', ev.value));
     
-    camPage.addBinding(camParams, 'kerfDiameter', { 
+    camPage.addBinding(bindingParams.cam, 'kerfDiameter', { 
         label: 'Kerf Diameter',
         step: 0.01
-    });
+    }).on('change', (ev: any) => useStore.getState().setCamParam('kerfDiameter', ev.value));
     
-    camPage.addBinding(camParams, 'numberOfPasses', {
+    camPage.addBinding(bindingParams.cam, 'numberOfPasses', {
         options: {
             '1': 1,
             '2': 2,
@@ -67,122 +128,123 @@ const ConfigWindow: React.FC = () => {
             '5': 5
         },
         label: 'Passes'
-    });
-
-    camPage.addButton({ title: 'Lead In / Lead Out' }).on('click', () => {
-        console.log('Lead In / Lead Out clicked');
-    });
-
-    camPage.addBinding(camParams, 'tolerance', { 
+    }).on('change', (ev: any) => useStore.getState().setCamParam('numberOfPasses', ev.value));
+    
+    camPage.addBinding(bindingParams.cam, 'tolerance', { 
         min: 0.001, max: 0.05, 
         label: 'Tolerance',
         format: (v: number) => `${v.toFixed(3)} mm`
-    });
+    }).on('change', (ev: any) => useStore.getState().setCamParam('tolerance', ev.value));
 
     camPage.addBlade({ view: 'separator' });
 
-    camPage.addButton({ title: 'Translate' }).on('click', () => {
-        console.log('Translate clicked');
-    });
+    camPage.addButton({ title: 'Lead In / Lead Out' }).on('click', () => console.log('Lead In / Lead Out'));
+    camPage.addButton({ title: 'Translate' }).on('click', () => console.log('Translate'));
+    camPage.addButton({ title: 'Rotate' }).on('click', () => console.log('Rotate'));
 
-    camPage.addButton({ title: 'Rotate' }).on('click', () => {
-        console.log('Rotate clicked');
-    });
+    camPage.addBlade({ view: 'separator' });
+
+    camPage.addBinding(bindingParams.cam, 'upperGuideZ', { label: 'Upper Guide Z' })
+        .on('change', (ev: any) => useStore.getState().setCamParam('upperGuideZ', ev.value));
+        
+    camPage.addBinding(bindingParams.cam, 'lowerGuideZ', { label: 'Lower Guide Z' })
+        .on('change', (ev: any) => useStore.getState().setCamParam('lowerGuideZ', ev.value));
+
+    camPage.addBlade({ view: 'separator' });
+
+    camPage.addButton({ title: 'Solve CAM' }).on('click', () => console.log('Solve CAM'));
+
+    // Functions Folder
+    const functionsFolder = camPage.addFolder({ title: 'Functions', expanded: false });
+    functionsFolder.addButton({ title: 'Auto Orient' }).on('click', () => console.log('Auto Orient'));
+    functionsFolder.addButton({ title: 'Detect Wall Shell' }).on('click', () => console.log('Detect Wall Shell'));
+    functionsFolder.addButton({ title: 'Generate Offset Shell' }).on('click', () => console.log('Generate Offset Shell'));
+    functionsFolder.addButton({ title: 'Extend to Guide Planes' }).on('click', () => console.log('Extend to Guide Planes'));
+    functionsFolder.addButton({ title: 'Intersect' }).on('click', () => console.log('Intersect'));
+    functionsFolder.addButton({ title: 'Rasterize' }).on('click', () => console.log('Rasterize'));
+    functionsFolder.addButton({ title: 'Linking' }).on('click', () => console.log('Linking'));
+    functionsFolder.addButton({ title: 'Post' }).on('click', () => console.log('Post'));
 
 
     // --- Spark Tab ---
     const sparkPage = tab.pages[1];
 
-    const sparkParams = {
-        pulseOnTime: 10,
-        pulseOffTime: 10,
-        dutyCycle: 50,
-        frequency: 50,
-        peakCurrent: 5,
-        servoVoltage: 25,
-        peakVoltage: 80,
-        polarity: true,
-    };
-
     // --- Temporal Folder ---
     const temporalFolder = sparkPage.addFolder({ title: 'Temporal' });
 
-    // Interdependent Logic for Temporal Params
-    const updateTemporal = (changedKey: string) => {
-        if (changedKey === 'on' || changedKey === 'off') {
-            // Update Duty Cycle and Frequency based on On/Off Time
-            const period = sparkParams.pulseOnTime + sparkParams.pulseOffTime;
-            if (period > 0) {
-                sparkParams.dutyCycle = (sparkParams.pulseOnTime / period) * 100;
-                sparkParams.frequency = 1000 / period; // 1000 us / period(us) = Mhz? No. 
-                                                       // 1/(period * 10^-6) Hz
-                                                       // 10^6 / period = Hz
-                                                       // 10^3 / period = kHz
-            }
-        } else if (changedKey === 'freq' || changedKey === 'duty') {
-            // Update On/Off Time based on Frequency and Duty Cycle
-            if (sparkParams.frequency > 0) {
-                const period = 1000 / sparkParams.frequency; // period in us
-                sparkParams.pulseOnTime = (sparkParams.dutyCycle / 100) * period;
-                sparkParams.pulseOffTime = period - sparkParams.pulseOnTime;
-            }
-        }
-        (pane as any).refresh();
+    const updateTemporal = (changedKey: 'on' | 'off' | 'duty' | 'freq') => {
+       useStore.getState().updateTemporalParams(changedKey);
+       // We must update our local binding params to reflect the calculated changes
+       const newSpark = useStore.getState().params.spark;
+       Object.assign(bindingParams.spark, newSpark);
+       (pane as any).refresh();
     };
 
-    temporalFolder.addBinding(sparkParams, 'pulseOnTime', { 
+    temporalFolder.addBinding(bindingParams.spark, 'pulseOnTime', { 
         min: 1, max: 1000, 
         label: 'Pulse On (µs)',
         format: (v: number) => v.toFixed(1)
-    }).on('change', () => updateTemporal('on'));
+    }).on('change', (ev: any) => {
+        useStore.getState().setSparkParam('pulseOnTime', ev.value);
+        updateTemporal('on');
+    });
 
-    temporalFolder.addBinding(sparkParams, 'pulseOffTime', { 
+    temporalFolder.addBinding(bindingParams.spark, 'pulseOffTime', { 
         min: 1, max: 1000, 
         label: 'Pulse Off (µs)',
         format: (v: number) => v.toFixed(1)
-    }).on('change', () => updateTemporal('off'));
+    }).on('change', (ev: any) => {
+        useStore.getState().setSparkParam('pulseOffTime', ev.value);
+        updateTemporal('off');
+    });
 
-    temporalFolder.addBinding(sparkParams, 'dutyCycle', { 
+    temporalFolder.addBinding(bindingParams.spark, 'dutyCycle', { 
         min: 0, max: 100, 
         label: 'Duty Cycle (%)',
         format: (v: number) => v.toFixed(1)
-    }).on('change', () => updateTemporal('duty'));
+    }).on('change', (ev: any) => {
+        useStore.getState().setSparkParam('dutyCycle', ev.value);
+        updateTemporal('duty');
+    });
 
-    temporalFolder.addBinding(sparkParams, 'frequency', { 
+    temporalFolder.addBinding(bindingParams.spark, 'frequency', { 
         min: 1, max: 1000, 
         label: 'Frequency (kHz)',
         format: (v: number) => v.toFixed(1)
-    }).on('change', () => updateTemporal('freq'));
+    }).on('change', (ev: any) => {
+        useStore.getState().setSparkParam('frequency', ev.value);
+        updateTemporal('freq');
+    });
 
 
     // --- Magnitude Folder ---
     const magnitudeFolder = sparkPage.addFolder({ title: 'Magnitude' });
 
-    magnitudeFolder.addBinding(sparkParams, 'peakCurrent', { 
+    magnitudeFolder.addBinding(bindingParams.spark, 'peakCurrent', { 
         min: 0.1, max: 50, 
         label: 'Peak Current (A)',
         format: (v: number) => v.toFixed(1)
-    });
+    }).on('change', (ev: any) => useStore.getState().setSparkParam('peakCurrent', ev.value));
 
-    magnitudeFolder.addBinding(sparkParams, 'servoVoltage', { 
+    magnitudeFolder.addBinding(bindingParams.spark, 'servoVoltage', { 
         min: 15, max: 45, 
         label: 'Servo Voltage (V)',
         format: (v: number) => v.toFixed(1)
-    });
+    }).on('change', (ev: any) => useStore.getState().setSparkParam('servoVoltage', ev.value));
 
-    magnitudeFolder.addBinding(sparkParams, 'peakVoltage', { 
+    magnitudeFolder.addBinding(bindingParams.spark, 'peakVoltage', { 
         min: 50, max: 200, 
         label: 'Peak Voltage (V)',
         format: (v: number) => v.toFixed(0)
-    });
+    }).on('change', (ev: any) => useStore.getState().setSparkParam('peakVoltage', ev.value));
 
-    magnitudeFolder.addBinding(sparkParams, 'polarity', { 
+    magnitudeFolder.addBinding(bindingParams.spark, 'polarity', { 
         label: 'Polarity',
         options: {
-            'Electrode Positive': true,
-            'Electrode Negative': false
+            'Electrode Positive': 'positive', // Updated to match store type
+            'Electrode Negative': 'negative'
         }
-    });
+    }).on('change', (ev: any) => useStore.getState().setSparkParam('polarity', ev.value));
 
     // --- Oscilloscopes (Graphs) Folder ---
     const scopeFolder = sparkPage.addFolder({ title: 'Oscilloscopes', expanded: true });
@@ -216,22 +278,25 @@ const ConfigWindow: React.FC = () => {
     const simulateScope = () => {
         if (!paneRef.current) return;
 
+        // Use current store values for simulation
+        const currentSpark = useStore.getState().params.spark;
+
         // Calculate current "time" in the pulse cycle based on index (0-49)
-        const totalTime = sparkParams.pulseOnTime + sparkParams.pulseOffTime;
-        const onFraction = totalTime > 0 ? sparkParams.pulseOnTime / totalTime : 0.5;
+        const totalTime = currentSpark.pulseOnTime + currentSpark.pulseOffTime;
+        const onFraction = totalTime > 0 ? currentSpark.pulseOnTime / totalTime : 0.5;
         const onSteps = Math.floor(onFraction * SIM_LENGTH);
         
         const i = scopeState.index;
         
         // Voltage Logic
         if (i === 0) scopeState.voltage = 0;
-        else if (i === 1) scopeState.voltage = sparkParams.peakVoltage;
-        else if (i < onSteps) scopeState.voltage = sparkParams.servoVoltage;
+        else if (i === 1) scopeState.voltage = currentSpark.peakVoltage;
+        else if (i < onSteps) scopeState.voltage = currentSpark.servoVoltage;
         else scopeState.voltage = 0;
         
         // Current Logic
         if (i < 2) scopeState.current = 0;
-        else if (i < onSteps) scopeState.current = sparkParams.peakCurrent;
+        else if (i < onSteps) scopeState.current = currentSpark.peakCurrent;
         else scopeState.current = 0;
         
         // Refresh graphs
@@ -242,37 +307,71 @@ const ConfigWindow: React.FC = () => {
         scopeState.index = (scopeState.index + 1) % SIM_LENGTH;
     };
 
-    const simInterval = setInterval(simulateScope, 20); // 50 points * 20ms = 1s per cycle visualization (slowed down for visibility)
+    const simInterval = setInterval(simulateScope, 20); 
 
     // --- Cost Tab ---
-    const costParams = {
-        materialCost: 50,
-        machineRate: 30,
-    };
-    tab.pages[2].addBinding(costParams, 'materialCost', { label: 'Material $/kg' });
-    tab.pages[2].addBinding(costParams, 'machineRate', { label: 'Machine $/hr' });
+    const costPage = tab.pages[2];
+    costPage.addBinding(bindingParams.cost, 'materialCost', { label: 'Material $/kg' })
+        .on('change', (ev: any) => useStore.getState().setCostParam('materialCost', ev.value));
+        
+    costPage.addBinding(bindingParams.cost, 'machineRate', { label: 'Machine $/hr' })
+        .on('change', (ev: any) => useStore.getState().setCostParam('machineRate', ev.value));
 
     // --- Kernel Tab ---
-    const kernelParams = {
-        version: '1.0.0',
-        debugMode: false,
-    };
-    tab.pages[3].addBinding(kernelParams, 'version', { readonly: true });
-    tab.pages[3].addBinding(kernelParams, 'debugMode');
+    const kernelPage = tab.pages[3];
+    const appVersion = useStore.getState().metadata.appVersion;
+    
+    // Create a local object for version since it's in metadata not params
+    const kernelLocal = { version: appVersion, ...bindingParams.kernel };
+    
+    kernelPage.addBinding(kernelLocal, 'version', { readonly: true });
+    
+    kernelPage.addBinding(bindingParams.kernel, 'debugMode')
+        .on('change', (ev: any) => useStore.getState().setKernelParam('debugMode', ev.value));
+        
+    kernelPage.addBinding(bindingParams.kernel, 'meshResolution', {
+        min: 0.1,
+        max: 10.0,
+        label: 'Mesh Resolution',
+    }).on('change', (ev: any) => {
+        useStore.getState().setKernelParam('meshResolution', ev.value);
+        
+        // Debounce reprocessing
+        if (debounceTimerRef.current) {
+            clearTimeout(debounceTimerRef.current);
+        }
+        
+        debounceTimerRef.current = window.setTimeout(() => {
+            reprocessCurrentModel(ev.value);
+        }, 500); // 500ms delay
+    });
 
     // --- Drill Tab ---
-    const drillParams = {
-        diameter: 3.0,
-        depth: 10.0,
-        peck: true,
-    };
-    tab.pages[4].addBinding(drillParams, 'diameter', { min: 0.1, max: 20 });
-    tab.pages[4].addBinding(drillParams, 'depth', { min: 0.1, max: 100 });
-    tab.pages[4].addBinding(drillParams, 'peck');
+    const drillPage = tab.pages[4];
+    drillPage.addBinding(bindingParams.drill, 'diameter', { min: 0.1, max: 20 })
+        .on('change', (ev: any) => useStore.getState().setDrillParam('diameter', ev.value));
+        
+    drillPage.addBinding(bindingParams.drill, 'depth', { min: 0.1, max: 100 })
+        .on('change', (ev: any) => useStore.getState().setDrillParam('depth', ev.value));
+        
+    drillPage.addBinding(bindingParams.drill, 'peck')
+        .on('change', (ev: any) => useStore.getState().setDrillParam('peck', ev.value));
 
     // --- Dev Tab ---
-    tab.pages[5].addButton({ title: 'Log State' }).on('click', () => {
-        console.log('Current Params:', { camParams, sparkParams, costParams, kernelParams, drillParams });
+    const devPage = tab.pages[5];
+    
+    devPage.addButton({ title: 'Log State' }).on('click', () => {
+        console.log('Current Store State:', useStore.getState());
+    });
+
+    devPage.addButton({ title: 'Copy State JSON' }).on('click', () => {
+        const json = JSON.stringify(useStore.getState(), null, 2);
+        navigator.clipboard.writeText(json).then(() => {
+            console.log('State copied to clipboard!');
+            alert('State copied to clipboard! You can paste this into jsoncrack.com');
+        }).catch(err => {
+            console.error('Failed to copy state:', err);
+        });
     });
 
     return () => {

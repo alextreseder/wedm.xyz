@@ -25,6 +25,7 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "three": "^0.182.0",
-    "tweakpane": "^4.0.5"
+    "tweakpane": "^4.0.5",
+    "zustand": "^5.0.10"
   }
 }

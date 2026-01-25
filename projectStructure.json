@@ -1,0 +1,83 @@
+{
+  "metadata": {
+    "projectName": "Untitled",
+    "lastModified": 1705519000000,
+    "appVersion": "0V01"
+  },
+  "params": {
+    "units": {
+      "system": "mm",
+      "scaleFactor": 1.0
+    },
+    "cam": {
+      "wireTension": 15,
+      "wireSpeed": 50,
+      "kerfDiameter": 0.25,
+      "numberOfPasses": 1,
+      "tolerance": 0.01,
+      "upperGuideZ": 100,
+      "lowerGuideZ": 0
+    },
+    "spark": {
+      "pulseOnTime": 10,
+      "pulseOffTime": 10,
+      "dutyCycle": 50,
+      "frequency": 50,
+      "peakCurrent": 5,
+      "servoVoltage": 25,
+      "peakVoltage": 80,
+      "polarity": "positive"
+    },
+    "cost": {
+      "materialCost": 50,
+      "machineRate": 30
+    },
+    "kernel": {
+      "meshResolution": 0.1,
+      "debugMode": false
+    },
+    "drill": {
+      "diameter": 3.0,
+      "depth": 10.0,
+      "peck": true
+    }
+  },
+  "brep": {
+    "loadedFileName": null,
+    "isValid": false,
+    "stats": {
+      "numSolids": 0,
+      "numFaces": 0,
+      "numEdges": 0,
+      "numVertices": 0
+    },
+    "features": {
+      "topPlaneId": null,
+      "bottomPlaneId": null,
+      "walls": []
+    }
+  },
+  "mesh": {
+    "showWireframe": false,
+    "showSolid": true,
+    "showAxes": true,
+    "showGrid": true,
+    "opacity": 1.0,
+    "materialColor": "#f5f5f5"
+  },
+  "cam": {
+    "operations": [],
+    "toolpath": {
+      "isValid": false,
+      "totalLength": 0,
+      "estimatedTime": 0,
+      "segments": []
+    }
+  },
+  "gcode": {
+    "text": "",
+    "lineCount": 0,
+    "lastGenerated": 0,
+    "warnings": []
+  }
+}
