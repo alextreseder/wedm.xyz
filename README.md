@@ -3,7 +3,7 @@
 ![Version](https://img.shields.io/badge/version-0V01-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-**[WEDM.XYZ]**(https://wedm.xyz) is a browser-based Computer-Aided Manufacturing (CAM) tool specifically designed for 4+1 axis Wire Electrical Discharge Machining (WEDM)
+[**WEDM.XYZ**](https://wedm.xyz) is a browser-based Computer-Aided Manufacturing (CAM) tool specifically designed for 4+1 axis Wire Electrical Discharge Machining (WEDM)
 
 > **UI Inspiration**: The layout and user interface philosophy are heavily inspired by [CascadeStudio](https://github.com/zalo/CascadeStudio), prioritizing a clean, window-based environment for complex 3D engineering tasks.
 
