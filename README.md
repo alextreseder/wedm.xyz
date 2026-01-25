@@ -10,9 +10,7 @@
 ---
 
 ## 📸 Screenshots
-
-> *Recommended: Add a screenshot here of the full "Standard Layout" with a model loaded, showing the Scene, Config, and Console windows.*
-`![Main Interface](./screenshots/main-interface.png)`
+![Main Interface]((https://github.com/alextreseder/wedm.xyz/blob/main/public/0V01screenshot.png))
 
 ---
 
