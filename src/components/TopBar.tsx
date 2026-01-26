@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { convertStepToGlb } from '../services/occtService';
+import { convertStepToMesh } from '../services/occtService';
 import { eventBus, EVENTS } from '../utils/eventBus';
 import { useStore } from '../store/useStore';
 
@@ -35,10 +35,10 @@ const TopBar: React.FC = () => {
       const meshResolution = useStore.getState().params.kernel.meshResolution;
 
       // Convert in worker thread (non-blocking)
-      const glbUrl = await convertStepToGlb(buffer, meshResolution);
+      const meshData = await convertStepToMesh(buffer, meshResolution);
       
       console.log('Conversion successful, updating scene...');
-      eventBus.emit(EVENTS.MODEL_LOADED, glbUrl);
+      eventBus.emit(EVENTS.MODEL_LOADED, meshData);
       
       // Reset input to allow selecting same file again
       if (fileInputRef.current) fileInputRef.current.value = '';

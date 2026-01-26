@@ -1,9 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { eventBus, EVENTS } from '../utils/eventBus';
 import { OrientationGizmo } from '../utils/OrientationGizmo';
+import type { MeshResult } from '../services/occtService';
 
 const SceneWindow: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -14,6 +14,16 @@ const SceneWindow: React.FC = () => {
   const controlsRef = useRef<OrbitControls | null>(null);
   const gizmoRef = useRef<OrientationGizmo | null>(null);
   const gizmoContainerRef = useRef<HTMLDivElement>(null);
+  
+  // Raycaster state
+  const raycasterRef = useRef(new THREE.Raycaster());
+  const mouseRef = useRef(new THREE.Vector2());
+  const highlightedFaceRef = useRef<{ object: THREE.Mesh, index: number } | null>(null);
+  const highlightedEdgeRef = useRef<{ object: THREE.LineSegments, index: number } | null>(null);
+
+  // Using a ref to track dirty state across closures
+  const viewDirtyRef = { current: true };
+  const markDirty = () => { viewDirtyRef.current = true; };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -28,7 +38,6 @@ const SceneWindow: React.FC = () => {
     // Initialize Camera
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
-    // this.camera = new THREE.PerspectiveCamera (45, 1, 1, 5000);
     const camera = new THREE.PerspectiveCamera(45, width / height, 1, 5000);
     camera.position.set(50, 100, 150);
     camera.lookAt(0, 45, 0);
@@ -37,8 +46,6 @@ const SceneWindow: React.FC = () => {
     // Initialize Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(width, height);
-    // this.renderer.shadowMap.enabled = true;
-    // this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     containerRef.current.appendChild(renderer.domElement);
@@ -49,15 +56,10 @@ const SceneWindow: React.FC = () => {
     controls.target.set(0, 45, 0);
     controls.panSpeed = 2;
     controls.zoomSpeed = 1;
-    controls.enableDamping = false; // Disabled as per request
+    controls.enableDamping = false;
     controls.screenSpacePanning = true;
     controls.update();
     controlsRef.current = controls;
-
-    // Lazy Rendering Logic
-    // Using a ref to track dirty state across closures
-    const viewDirtyRef = { current: true };
-    const markDirty = () => { viewDirtyRef.current = true; };
 
     controls.addEventListener('change', markDirty);
 
@@ -71,7 +73,7 @@ const SceneWindow: React.FC = () => {
             const newPos = axis.direction.multiplyScalar(distance).add(controls.target);
             camera.position.copy(newPos);
             camera.lookAt(controls.target);
-            controls.update(); // Update controls to match new camera pos
+            controls.update();
             markDirty();
         };
         gizmoRef.current = gizmo;
@@ -89,23 +91,22 @@ const SceneWindow: React.FC = () => {
     light2.shadow.camera.bottom = -200;
     light2.shadow.camera.left = -200;
     light2.shadow.camera.right = 200;
-    light2.shadow.mapSize.width = 1024; // 128 is very low resolution
+    light2.shadow.mapSize.width = 1024;
     light2.shadow.mapSize.height = 1024;
     scene.add(light2);
 
-    // Load the Shiny Dull Metal Matcap Material
+    // Load Materials
     const textureLoader = new THREE.TextureLoader();
     textureLoader.setCrossOrigin('');
-    const matcap = textureLoader.load('./textures/dullFrontLitMetal.png', () => {
-      markDirty();
-    });
+    const matcap = textureLoader.load('./textures/dullFrontLitMetal.png', () => markDirty());
 
     const matcapMaterial = new THREE.MeshMatcapMaterial({
       color: new THREE.Color(0xf5f5f5),
       matcap: matcap,
       polygonOffset: true,
       polygonOffsetFactor: 2.0,
-      polygonOffsetUnits: 1.0
+      polygonOffsetUnits: 1.0,
+      vertexColors: true // Enable vertex colors for highlighting
     });
 
     // Create the ground mesh
@@ -138,74 +139,186 @@ const SceneWindow: React.FC = () => {
     mainObject.rotation.x = -Math.PI / 2;
     scene.add(mainObject);
 
-    // Listen for model loading events
-    const unsubscribe = eventBus.on(EVENTS.MODEL_LOADED, (url: string | null) => {
-      // Clear previous model if needed
+    // --- Interaction Logic ---
+    const onMouseMove = (event: MouseEvent) => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        
+        // Raycasting for highlight
+        raycasterRef.current.setFromCamera(mouseRef.current, camera);
+        
+        // Intersect main object children (Mesh and Lines)
+        const intersects = raycasterRef.current.intersectObjects(mainObject.children, false);
+        
+        if (intersects.length > 0) {
+            const hit = intersects[0];
+            const object = hit.object;
+
+            if (object instanceof THREE.Mesh) {
+                // Handle Face Highlight
+                // The hit.face.a is the index of the first vertex of the triangle hit
+                const faceIdAttribute = object.geometry.getAttribute('faceId');
+                
+                if (faceIdAttribute && hit.face) {
+                    const faceId = faceIdAttribute.getX(hit.face.a); // Get custom Face ID
+
+                    // Only update if changed
+                    if (!highlightedFaceRef.current || highlightedFaceRef.current.index !== faceId) {
+                        
+                        // Clear previous highlight
+                        if (highlightedFaceRef.current) {
+                            const colors = highlightedFaceRef.current.object.geometry.getAttribute('color');
+                            // Reset to white
+                             for (let i = 0; i < colors.count; i++) {
+                                colors.setXYZ(i, 1, 1, 1);
+                            }
+                            colors.needsUpdate = true;
+                        }
+
+                        // Apply new highlight
+                        const colors = object.geometry.getAttribute('color');
+                        for (let i = 0; i < faceIdAttribute.count; i++) {
+                            if (faceIdAttribute.getX(i) === faceId) {
+                                colors.setXYZ(i, 1, 0, 0); // Red highlight
+                            }
+                        }
+                        colors.needsUpdate = true;
+                        
+                        highlightedFaceRef.current = { object, index: faceId };
+                        containerRef.current!.title = `Face Index: ${faceId}`;
+                        markDirty();
+                    }
+                }
+            } else if (object instanceof THREE.LineSegments) {
+                // Handle Edge Highlight
+                // Line intersection gives index of segment
+                const edgeIdAttribute = object.geometry.getAttribute('edgeId');
+                if (edgeIdAttribute && hit.index !== undefined) {
+                    // For LineSegments, index is the index of the start vertex of the segment
+                    const edgeId = edgeIdAttribute.getX(hit.index);
+
+                    if (!highlightedEdgeRef.current || highlightedEdgeRef.current.index !== edgeId) {
+                        // Clear previous
+                         if (highlightedEdgeRef.current) {
+                            const colors = highlightedEdgeRef.current.object.geometry.getAttribute('color');
+                            for (let i = 0; i < colors.count; i++) colors.setXYZ(i, 1, 1, 1);
+                            colors.needsUpdate = true;
+                        }
+
+                        // Highlight
+                        const colors = object.geometry.getAttribute('color');
+                        for (let i = 0; i < edgeIdAttribute.count; i++) {
+                            if (edgeIdAttribute.getX(i) === edgeId) {
+                                colors.setXYZ(i, 1, 0, 0); // Red
+                            }
+                        }
+                        colors.needsUpdate = true;
+
+                        highlightedEdgeRef.current = { object, index: edgeId };
+                        containerRef.current!.title = `Edge Index: ${edgeId}`;
+                        markDirty();
+                    }
+                }
+            }
+        } else {
+            // Clear highlights if nothing hit
+            if (highlightedFaceRef.current) {
+                 const colors = highlightedFaceRef.current.object.geometry.getAttribute('color');
+                 for (let i = 0; i < colors.count; i++) colors.setXYZ(i, 1, 1, 1);
+                 colors.needsUpdate = true;
+                 highlightedFaceRef.current = null;
+                 containerRef.current!.title = "";
+                 markDirty();
+            }
+            if (highlightedEdgeRef.current) {
+                const colors = highlightedEdgeRef.current.object.geometry.getAttribute('color');
+                for (let i = 0; i < colors.count; i++) colors.setXYZ(i, 1, 1, 1);
+                colors.needsUpdate = true;
+                highlightedEdgeRef.current = null;
+                containerRef.current!.title = "";
+                markDirty();
+            }
+        }
+    };
+
+    containerRef.current.addEventListener('mousemove', onMouseMove);
+
+    // --- Event Listeners ---
+    const unsubscribe = eventBus.on(EVENTS.MODEL_LOADED, (meshData: MeshResult | null) => {
       mainObject.clear();
+      highlightedFaceRef.current = null;
+      highlightedEdgeRef.current = null;
       
-      if (!url) {
-        console.log('Scene cleared');
+      if (!meshData) {
         markDirty();
         return;
       }
 
-      console.log('SceneWindow received model URL:', url);
-      const loader = new GLTFLoader();
-      loader.load(url, (gltf: any) => {
-        // Clear previous model if needed - Done above
-        // mainObject.clear(); 
-        // For now, let's add to mainObject instead of scene root
-        
-        mainObject.add(gltf.scene);
-        console.log('Model added to scene');
-        
-        // Enable shadows and apply matcap material for the loaded model
-        gltf.scene.traverse((child: any) => {
-           if (child.isMesh) {
-             child.castShadow = true;
-             child.receiveShadow = true;
-             child.material = matcapMaterial; // Apply the metal matcap
-           }
-        });
+      // console.log('Building geometry from manual mesh data...');
+      // console.log('Faces:', meshData.faces.positions.length / 3, 'vertices');
+      // console.log('Edges:', meshData.edges.positions.length / 3, 'vertices');
 
-        // Center camera on object
-        const box = new THREE.Box3().setFromObject(gltf.scene);
-        const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
-        
-        const maxDim = Math.max(size.x, size.y, size.z);
-        const fov = camera.fov * (Math.PI / 180);
-        let cameraZ = Math.abs(maxDim / 2 * Math.tan(fov * 2));
-        cameraZ *= 1.5; // Zoom out a bit
+      // 1. Build Face Mesh
+      if (meshData.faces.positions.length === 0) {
+          console.warn("No face data received from worker.");
+      }
 
-        // camera.position.set(center.x + cameraZ, center.y + cameraZ / 2, center.z + cameraZ);
-        controls.target.copy(center);
-        controls.update();
-        markDirty(); // Trigger render
+      const faceGeo = new THREE.BufferGeometry();
+      faceGeo.setAttribute('position', new THREE.BufferAttribute(meshData.faces.positions, 3));
+      faceGeo.setAttribute('normal', new THREE.BufferAttribute(meshData.faces.normals, 3));
+      faceGeo.setIndex(new THREE.BufferAttribute(meshData.faces.indices, 1));
+      
+      // Custom Attribute: Face ID
+      faceGeo.setAttribute('faceId', new THREE.BufferAttribute(meshData.faces.ids, 1));
+      
+      // Color Attribute (Initialized to White)
+      const faceCount = meshData.faces.positions.length / 3;
+      const faceColors = new Float32Array(faceCount * 3).fill(1); // RGB: 1,1,1
+      faceGeo.setAttribute('color', new THREE.BufferAttribute(faceColors, 3));
 
-      }, undefined, (error: any) => {
-        console.error('Error loading GLTF:', error);
-      });
+      const mesh = new THREE.Mesh(faceGeo, matcapMaterial);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mainObject.add(mesh);
+
+      // 2. Build Edge Lines
+      if (meshData.edges && meshData.edges.positions.length > 0) {
+          const edgeGeo = new THREE.BufferGeometry();
+          edgeGeo.setAttribute('position', new THREE.BufferAttribute(meshData.edges.positions, 3));
+          edgeGeo.setAttribute('edgeId', new THREE.BufferAttribute(meshData.edges.ids, 1));
+          
+          const edgeCount = meshData.edges.positions.length / 3;
+          const edgeColors = new Float32Array(edgeCount * 3).fill(1);
+          edgeGeo.setAttribute('color', new THREE.BufferAttribute(edgeColors, 3));
+
+          const lineMat = new THREE.LineBasicMaterial({ 
+              vertexColors: true, 
+              linewidth: 2, 
+              depthTest: false // Draw on top
+          });
+          // Note: depthTest false makes lines always visible, might want polygonOffset instead?
+          // Trying polygonOffset on lines is tricky, usually handled by material.
+          
+          const lines = new THREE.LineSegments(edgeGeo, lineMat);
+          mainObject.add(lines);
+      }
+
+      // Center camera
+      const box = new THREE.Box3().setFromObject(mainObject);
+      const center = box.getCenter(new THREE.Vector3());
+      controls.target.copy(center);
+      controls.update();
+      markDirty();
     });
 
     // Animation Loop
     const animate = () => {
       animationFrameRef.current = requestAnimationFrame(animate);
 
-      if (controlsRef.current) {
-        controlsRef.current.update();
-      }
-      
-      // Always update gizmo on each frame if camera moves
-      // But for lazy rendering, we might only want to update if dirty.
-      // However, gizmo needs continuous updates during drag.
-      // Let's hook it into the dirty check or just run it.
-      // Running it always is safer for smoothness during interaction.
-      if (gizmoRef.current) {
-          gizmoRef.current.update();
-      }
+      if (controlsRef.current) controlsRef.current.update();
+      if (gizmoRef.current) gizmoRef.current.update();
 
-      // Lazy rendering: only render if view is dirty or loading happened
       if (viewDirtyRef.current && rendererRef.current && sceneRef.current && cameraRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
         viewDirtyRef.current = false;
@@ -213,41 +326,28 @@ const SceneWindow: React.FC = () => {
     };
     animate();
 
-    // Handle Resize
     const handleResize = () => {
       if (!containerRef.current || !cameraRef.current || !rendererRef.current) return;
-
       const newWidth = containerRef.current.clientWidth;
       const newHeight = containerRef.current.clientHeight;
-
       cameraRef.current.aspect = newWidth / newHeight;
       cameraRef.current.updateProjectionMatrix();
       rendererRef.current.setSize(newWidth, newHeight);
       markDirty();
     };
 
-    const resizeObserver = new ResizeObserver(() => {
-        handleResize();
-    });
+    const resizeObserver = new ResizeObserver(() => handleResize());
     resizeObserver.observe(containerRef.current);
 
     return () => {
       unsubscribe();
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
+      containerRef.current?.removeEventListener('mousemove', onMouseMove);
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
       if (rendererRef.current) {
         rendererRef.current.dispose();
-        if (containerRef.current?.contains(rendererRef.current.domElement)) {
-            containerRef.current.removeChild(rendererRef.current.domElement);
-        }
+        containerRef.current?.removeChild(rendererRef.current.domElement);
       }
-      if (gizmoRef.current) {
-        gizmoRef.current.dispose();
-        if (gizmoContainerRef.current && gizmoRef.current.getElement()) {
-            gizmoContainerRef.current.innerHTML = '';
-        }
-      }
+      if (gizmoRef.current) gizmoRef.current.dispose();
       resizeObserver.disconnect();
     };
   }, []);
@@ -255,22 +355,11 @@ const SceneWindow: React.FC = () => {
   return (
     <div 
       ref={containerRef} 
-      style={{ 
-        width: '100%', 
-        height: '100%', 
-        overflow: 'hidden',
-        position: 'relative'
-      }} 
+      style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative' }} 
     >
       <div 
         ref={gizmoContainerRef} 
-        style={{
-            position: 'absolute',
-            top: '15px',
-            left: '15px',
-            zIndex: 1000
-            // pointerEvents: 'none' removed to allow interaction with the gizmo
-        }}
+        style={{ position: 'absolute', top: '15px', left: '15px', zIndex: 1000 }}
       />
     </div>
   );

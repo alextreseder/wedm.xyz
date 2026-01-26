@@ -10,6 +10,19 @@ let currentFileBuffer: ArrayBuffer | null = null;
 // Map to store pending promise resolvers
 const pendingRequests = new Map<string, { resolve: (val: any) => void, reject: (err: any) => void }>();
 
+export interface MeshResult {
+    faces: {
+        positions: Float32Array;
+        normals: Float32Array;
+        indices: Uint32Array;
+        ids: Float32Array;
+    };
+    edges: {
+        positions: Float32Array;
+        ids: Float32Array;
+    };
+}
+
 /**
  * Initializes the OCCT worker if not already running.
  */
@@ -39,39 +52,28 @@ const getWorker = () => {
 };
 
 /**
- * Sends a STEP file buffer to the worker for conversion to GLB.
- * This runs off the main thread to prevent UI freezing.
+ * Sends a STEP file buffer to the worker for manual tessellation.
  * 
  * @param fileBuffer - The ArrayBuffer of the STEP file.
  * @param linearDeflection - Mesh resolution (default 1.0).
- * @returns Promise resolving to a Blob URL of the GLB model.
+ * @returns Promise resolving to the Raw Mesh Data.
  */
-export const convertStepToGlb = async (fileBuffer: ArrayBuffer, linearDeflection: number = 1.0): Promise<string> => {
+export const convertStepToMesh = async (fileBuffer: ArrayBuffer, linearDeflection: number = 1.0): Promise<MeshResult> => {
   const worker = getWorker();
   const id = Math.random().toString(36).substr(2, 9);
   
-  // Cache the file buffer for potential reprocessing (e.g. changing mesh resolution)
-  // We MUST slice it because the original might be transferred or detached.
-  // Actually, we should store a copy BEFORE we transfer it to the worker.
   if (fileBuffer !== currentFileBuffer) {
       currentFileBuffer = fileBuffer.slice(0);
   }
 
-  // We also need to send a copy to the worker because it will be transferred
   const bufferToSend = fileBuffer.slice(0);
 
   return new Promise((resolve, reject) => {
     pendingRequests.set(id, {
-      resolve: (glbBuffer: ArrayBuffer) => {
-        const blob = new Blob([glbBuffer], { type: 'model/gltf-binary' });
-        const url = URL.createObjectURL(blob);
-        resolve(url);
-      },
+      resolve: (data: MeshResult) => resolve(data),
       reject
     });
 
-    // Post message to worker, transferring buffer ownership for performance
-    // Payload includes buffer and options
     worker.postMessage(
         { 
             type: 'CONVERT_STEP', 
@@ -85,9 +87,7 @@ export const convertStepToGlb = async (fileBuffer: ArrayBuffer, linearDeflection
 
 /**
  * Reprocesses the currently loaded file with a new mesh resolution.
- * Emits EVENTS.MODEL_LOADED when complete.
- * 
- * @param linearDeflection - The new mesh resolution.
+ * Emits EVENTS.MODEL_LOADED with the new MeshResult.
  */
 export const reprocessCurrentModel = async (linearDeflection: number) => {
     if (!currentFileBuffer) {
@@ -97,12 +97,10 @@ export const reprocessCurrentModel = async (linearDeflection: number) => {
 
     try {
         console.log(`Reprocessing model with mesh resolution: ${linearDeflection}`);
-        // We use the cached buffer. We must slice it again to keep our cache intact
-        // while sending a transferable copy to the worker.
-        const url = await convertStepToGlb(currentFileBuffer, linearDeflection);
+        const result = await convertStepToMesh(currentFileBuffer, linearDeflection);
         
-        // Broadcast the new model URL so the SceneWindow updates
-        eventBus.emit(EVENTS.MODEL_LOADED, url);
+        // Broadcast the new mesh result object directly
+        eventBus.emit(EVENTS.MODEL_LOADED, result);
         console.log("Model reprocessed and updated.");
     } catch (error) {
         console.error("Failed to reprocess model:", error);
