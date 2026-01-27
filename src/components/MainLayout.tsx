@@ -10,7 +10,6 @@ import ConsoleWindow from './ConsoleWindow';
 import SceneWindow from './SceneWindow';
 import ConfigWindow from './ConfigWindow';
 import GCodeWindow from './GCodeWindow';
-import InterfaceWindow from './InterfaceWindow';
 
 /**
  * Interface representing the state for the standard window component.
@@ -99,59 +98,38 @@ const MainLayout: React.FC = () => {
     });
 
     /**
-     * Register 'interface-window'
-     * Renders the InterfaceWindow React component.
-     */
-    layout.registerComponentFactoryFunction('interface-window', (container: ComponentContainer) => {
-      const root = createRoot(container.element);
-      root.render(<InterfaceWindow />);
-      container.on('destroy', () => { root.unmount(); });
-    });
-
-    /**
      * Define the layout configuration.
      * 
-     * Left Column (A): 25% width
-     *   - Stack (Config, G-Code): 75% height
-     *   - Interface: 25% height (to match Console)
-     * Right Column (B): 75% width
-     *   - Scene: 75% height
-     *   - Console: 25% height
+     * Left Column (A): 20% width
+     *   - Stack:
+     *     - Config (Tweakpane)
+     *     - G-Code
+     * Right Column:
+     *   - Scene (B): Top 2/3
+     *   - Console (C): Bottom 1/3
      */
     const config: LayoutConfig = {
       root: {
         type: 'row',
         content: [
           {
-            type: 'column',
-            width: 25,
+            type: 'stack',
+            width: 15,
             content: [
                 {
-                    type: 'stack',
-                    height: 75,
-                    content: [
-                        {
-                            type: 'component',
-                            componentType: 'config-window',
-                            title: 'Config',
-                            componentState: { label: 'Config' }
-                        } as ComponentItemConfig,
-                        {
-                            type: 'component',
-                            componentType: 'gcode-window',
-                            title: 'G-Code',
-                            componentState: { label: 'G-Code' }
-                        } as ComponentItemConfig
-                    ]
-                } as StackItemConfig,
+                    type: 'component',
+                    componentType: 'config-window',
+                    title: 'Config',
+                    componentState: { label: 'Config' }
+                } as ComponentItemConfig,
                 {
                     type: 'component',
-                    componentType: 'interface-window',
-                    title: 'Interface',
-                    height: 25
+                    componentType: 'gcode-window',
+                    title: 'G-Code',
+                    componentState: { label: 'G-Code' }
                 } as ComponentItemConfig
             ]
-          } as RowOrColumnItemConfig,
+          } as StackItemConfig,
           {
             type: 'column',
             content: [
