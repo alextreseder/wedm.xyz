@@ -21,6 +21,9 @@ export interface MeshResult {
         positions: Float32Array;
         ids: Float32Array;
     };
+    vertices: {
+        positions: Float32Array;
+    };
 }
 
 /**

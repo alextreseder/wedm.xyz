@@ -90,6 +90,17 @@ export interface ProjectState {
             bottomPlaneId: number | null; // ID of the face designated as Bottom
             walls: number[];              // Array of face IDs identified as vertical walls
         };
+
+        /**
+         * Selection State: Currently selected BRep entities.
+         * These are confirmed selections (clicked), not hover state.
+         * Used as inputs for CAM operations.
+         */
+        selection: {
+            faces: number[];     // Array of selected face IDs
+            edges: number[];     // Array of selected edge IDs
+            vertices: number[];  // Array of selected vertex IDs
+        };
     };
 
     /**
@@ -104,6 +115,18 @@ export interface ProjectState {
         showGrid: boolean;
         opacity: number;           // Transparency of the model
         materialColor: string;     // Hex color code
+        
+        /**
+         * Selection Settings: Controls which entity types can be selected
+         * and the screen-space proximity thresholds for detection.
+         */
+        selection: {
+            faceEnabled: boolean;              // Can user select faces?
+            edgeEnabled: boolean;              // Can user select edges?
+            vertexEnabled: boolean;            // Can user select vertices?
+            edgeProximityThreshold: number;    // Pixels - distance to detect edge hover
+            vertexProximityThreshold: number;  // Pixels - distance to detect vertex hover
+        };
     };
 
     /**
@@ -206,6 +229,11 @@ export const initialProjectState: ProjectState = {
             topPlaneId: null,
             bottomPlaneId: null,
             walls: []
+        },
+        selection: {
+            faces: [],
+            edges: [],
+            vertices: []
         }
     },
     mesh: {
@@ -214,7 +242,14 @@ export const initialProjectState: ProjectState = {
         showAxes: true,
         showGrid: true,
         opacity: 1.0,
-        materialColor: '#f5f5f5' // Matches current matcap base
+        materialColor: '#f5f5f5', // Matches current matcap base
+        selection: {
+            faceEnabled: true,
+            edgeEnabled: true,
+            vertexEnabled: true,
+            edgeProximityThreshold: 8,    // pixels
+            vertexProximityThreshold: 12  // pixels
+        }
     },
     cam: {
         operations: [],

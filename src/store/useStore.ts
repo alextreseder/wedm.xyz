@@ -2,10 +2,27 @@ import { create } from 'zustand';
 import { initialProjectState } from './projectState';
 import type { ProjectState } from './projectState';
 
+/**
+ * Hovered Entity Type
+ * Represents what the user is currently hovering over (transient UI state)
+ */
+export interface HoveredEntity {
+    type: 'face' | 'edge' | 'vertex';
+    id: number;
+}
+
 interface ProjectStore extends ProjectState {
-    // Actions
-    // These are the "Backend Functions" you asked for.
-    // They are the ONLY way to modify the state.
+    // =========================================================================
+    // TRANSIENT UI STATE (not serialized to ProjectState JSON)
+    // =========================================================================
+    
+    /** Currently hovered entity (changes on mouse move, not persisted) */
+    hoveredEntity: HoveredEntity | null;
+
+    // =========================================================================
+    // ACTIONS
+    // =========================================================================
+    // These are the "Backend Functions" - the ONLY way to modify the state.
     
     // --- Generic Setters ---
     setMetadata: (metadata: Partial<ProjectState['metadata']>) => void;
@@ -26,12 +43,42 @@ interface ProjectStore extends ProjectState {
 
     // --- G-Code Actions ---
     setGCodeText: (text: string) => void;
+
+    // --- Selection Actions ---
+    /** Set the currently hovered entity (transient, for visual feedback) */
+    setHoveredEntity: (entity: HoveredEntity | null) => void;
+    
+    /** Toggle a face in the selection (add if not present, remove if present) */
+    toggleFaceSelection: (faceId: number) => void;
+    
+    /** Toggle an edge in the selection */
+    toggleEdgeSelection: (edgeId: number) => void;
+    
+    /** Toggle a vertex in the selection */
+    toggleVertexSelection: (vertexId: number) => void;
+    
+    /** Clear all selections */
+    clearSelection: () => void;
+    
+    /** Clear selection of a specific type */
+    clearSelectionType: (type: 'face' | 'edge' | 'vertex') => void;
+    
+    /** Enable/disable selection of a specific entity type */
+    setSelectionEnabled: (type: 'face' | 'edge' | 'vertex', enabled: boolean) => void;
+    
+    /** Set the proximity threshold for edge/vertex detection */
+    setProximityThreshold: (type: 'edge' | 'vertex', pixels: number) => void;
 }
 
 export const useStore = create<ProjectStore>((set, get) => ({
     ...initialProjectState,
 
-    // --- Actions ---
+    // Transient state initialization
+    hoveredEntity: null,
+
+    // =========================================================================
+    // ACTIONS
+    // =========================================================================
 
     setMetadata: (newMetadata) => set((state) => ({
         metadata: { ...state.metadata, ...newMetadata }
@@ -134,5 +181,95 @@ export const useStore = create<ProjectStore>((set, get) => ({
             lineCount: text.split('\n').length,
             lastGenerated: Date.now()
         }
-    }))
+    })),
+
+    // =========================================================================
+    // SELECTION ACTIONS
+    // =========================================================================
+
+    setHoveredEntity: (entity) => set({ hoveredEntity: entity }),
+
+    toggleFaceSelection: (faceId) => set((state) => {
+        const currentFaces = state.brep.selection.faces;
+        const index = currentFaces.indexOf(faceId);
+        const newFaces = index === -1 
+            ? [...currentFaces, faceId]  // Add
+            : currentFaces.filter(id => id !== faceId);  // Remove
+        
+        return {
+            brep: {
+                ...state.brep,
+                selection: { ...state.brep.selection, faces: newFaces }
+            }
+        };
+    }),
+
+    toggleEdgeSelection: (edgeId) => set((state) => {
+        const currentEdges = state.brep.selection.edges;
+        const index = currentEdges.indexOf(edgeId);
+        const newEdges = index === -1
+            ? [...currentEdges, edgeId]
+            : currentEdges.filter(id => id !== edgeId);
+        
+        return {
+            brep: {
+                ...state.brep,
+                selection: { ...state.brep.selection, edges: newEdges }
+            }
+        };
+    }),
+
+    toggleVertexSelection: (vertexId) => set((state) => {
+        const currentVertices = state.brep.selection.vertices;
+        const index = currentVertices.indexOf(vertexId);
+        const newVertices = index === -1
+            ? [...currentVertices, vertexId]
+            : currentVertices.filter(id => id !== vertexId);
+        
+        return {
+            brep: {
+                ...state.brep,
+                selection: { ...state.brep.selection, vertices: newVertices }
+            }
+        };
+    }),
+
+    clearSelection: () => set((state) => ({
+        brep: {
+            ...state.brep,
+            selection: { faces: [], edges: [], vertices: [] }
+        }
+    })),
+
+    clearSelectionType: (type) => set((state) => {
+        const key = type === 'face' ? 'faces' : type === 'edge' ? 'edges' : 'vertices';
+        return {
+            brep: {
+                ...state.brep,
+                selection: { ...state.brep.selection, [key]: [] }
+            }
+        };
+    }),
+
+    setSelectionEnabled: (type, enabled) => set((state) => {
+        const key = type === 'face' ? 'faceEnabled' 
+                  : type === 'edge' ? 'edgeEnabled' 
+                  : 'vertexEnabled';
+        return {
+            mesh: {
+                ...state.mesh,
+                selection: { ...state.mesh.selection, [key]: enabled }
+            }
+        };
+    }),
+
+    setProximityThreshold: (type, pixels) => set((state) => {
+        const key = type === 'edge' ? 'edgeProximityThreshold' : 'vertexProximityThreshold';
+        return {
+            mesh: {
+                ...state.mesh,
+                selection: { ...state.mesh.selection, [key]: pixels }
+            }
+        };
+    })
 }));

@@ -172,7 +172,64 @@ function ForEachEdge(OC: any, shape: any, callback: (index: number, edge: any) =
     let edgeHash = edgeCasted.HashCode(100000000);
     if(!edgeHashes.hasOwnProperty(edgeHash)){
       edgeHashes[edgeHash] = edgeIndex;
-      callback(edgeIndex++, edge);
+      callback(edgeIndex++, edgeCasted); // Pass the casted edge, not the raw shape
+    }
+  }
+  anExplorer.delete();
+}
+
+function ForEachVertex(OC: any, shape: any, callback: (index: number, vertex: any) => void) {
+  let vertexHashes: {[key: number]: number} = {};
+  let vertexIndex = 0;
+  let anExplorer;
+
+  try {
+      try {
+        anExplorer = new OC.TopExp_Explorer();
+      } catch(e) {
+        if (OC.TopExp_Explorer_1) anExplorer = new OC.TopExp_Explorer_1();
+        else if (OC.TopExp_Explorer_2) anExplorer = new OC.TopExp_Explorer_2();
+      }
+
+      if (!anExplorer) {
+          anExplorer = createInstance(OC, "TopExp_Explorer");
+      }
+
+      let vertexEnum = OC.TopAbs_VERTEX;
+      if (vertexEnum === undefined && OC.TopAbs_ShapeEnum) {
+          vertexEnum = OC.TopAbs_ShapeEnum.TopAbs_VERTEX;
+      }
+
+      let shapeEnum = OC.TopAbs_SHAPE;
+      if (shapeEnum === undefined && OC.TopAbs_ShapeEnum) {
+          shapeEnum = OC.TopAbs_ShapeEnum.TopAbs_SHAPE;
+      }
+
+      anExplorer.Init(shape, vertexEnum, shapeEnum);
+
+  } catch(e) {
+      console.error("ForEachVertex init failed:", e);
+      throw e;
+  }
+
+  for (; anExplorer.More(); anExplorer.Next()) {
+    let vertex = anExplorer.Current();
+    let vertexCasted;
+    
+    if (OC.TopoDS.Vertex) {
+        vertexCasted = OC.TopoDS.Vertex(vertex);
+    } else if (OC.TopoDS.Vertex_1) {
+        vertexCasted = OC.TopoDS.Vertex_1(vertex);
+    } else if (OC.TopoDS.prototype && OC.TopoDS.prototype.Vertex) {
+        vertexCasted = OC.TopoDS.prototype.Vertex(vertex);
+    } else {
+        vertexCasted = vertex;
+    }
+
+    let vertexHash = vertexCasted.HashCode(100000000);
+    if(!vertexHashes.hasOwnProperty(vertexHash)){
+      vertexHashes[vertexHash] = vertexIndex;
+      callback(vertexIndex++, vertexCasted);
     }
   }
   anExplorer.delete();
@@ -208,7 +265,18 @@ const convertStepToMesh = async (fileBuffer: ArrayBuffer, linearDeflection: numb
     let faceIndices: number[] = [];
     let faceIds: number[] = []; // Maps vertex -> Face Index
     let globalVertexOffset = 0;
-    // let processedFaces = 0; // Removed debug counter
+    
+    // Store triangulation data for edge extraction (Method 2: PolygonOnTriangulation)
+    interface FaceTriData {
+        face: any;
+        triangulationHandle: any;  // The Handle<Poly_Triangulation>
+        triangulation: any;        // The dereferenced Poly_Triangulation
+        location: any;
+        nodeAccessorType: string;
+        nodesLower: number;
+        NodesArray: any;
+    }
+    const faceTriangulations: FaceTriData[] = [];
 
     ForEachFace(OC, shape, (faceIndex, myFace) => {
         // processedFaces++; // Removed debug counter
@@ -457,116 +525,237 @@ const convertStepToMesh = async (fileBuffer: ArrayBuffer, linearDeflection: numb
             );
         }
 
+        // Store triangulation data for edge extraction
+        faceTriangulations.push({
+            face: myFace,
+            triangulationHandle: myT,
+            triangulation: triangulation,
+            location: aLocation,
+            nodeAccessorType,
+            nodesLower,
+            NodesArray
+        });
+
         globalVertexOffset += nodesLength;
     });
 
-    // console.log(`Worker: Processed ${processedFaces} faces. Extracted ${faceVertices.length / 3} vertices.`);
+    // =========================================================================
+    // 5. EDGE EXTRACTION using PolygonOnTriangulation
+    // =========================================================================
+    // 
+    // Strategy: Extract edge line vertices from the face triangulations using
+    // BRep_Tool::PolygonOnTriangulation. This returns indices into the face's
+    // triangulation node array, giving us the EXACT same vertices used by the
+    // mesh faces - ensuring perfect visual alignment with no gaps.
+    //
+    // Fallback: If an edge doesn't have PolygonOnTriangulation data (rare),
+    // we sample points along the BRep curve directly.
+    // =========================================================================
 
-    // 5. Extract Edge Line Data
     let edgeVertices: number[] = [];
-    let edgeIds: number[] = []; // Maps vertex -> Edge Index (for shader/picking)
-    let globalEdgeIndices: number[] = []; // For the LineSegments geometry structure
+    let edgeIds: number[] = [];  // Maps each vertex to its BRep edge index
+    let edgeProcessingErrors: string[] = [];
+    let edgesUsingPolyOnTri = 0;
+    let edgesUsingFallback = 0;
 
-    // This metadata helps look up which range of vertices belongs to which edge
-    let edgeMetadata: {[key: number]: {start: number, count: number}} = {}; 
-
-    ForEachEdge(OC, shape, (edgeIndex, myEdge) => {
-        let aLocation;
-        try {
-            aLocation = new OC.TopLoc_Location();
-        } catch(e) {
-            aLocation = createInstance(OC, "TopLoc_Location");
+    /**
+     * Gets a node position from a face's triangulation by index.
+     * Handles both modern OCCT API (Node(i)) and legacy API (Nodes().Value(i)).
+     */
+    const getNodeFromTriangulation = (triData: FaceTriData, nodeIndex: number): any => {
+        if (triData.nodeAccessorType === "direct") {
+            return triData.triangulation.Node?.(nodeIndex) 
+                || triData.triangulation.Node_1?.(nodeIndex);
         }
+        return triData.NodesArray?.Value(nodeIndex);
+    };
 
-        let adaptorCurve;
-        try {
-            // BRepAdaptor_Curve constructor might not work with new
-            // Sometimes it's a struct that needs arguments
-            if (OC.BRepAdaptor_Curve) {
-                 try {
-                    adaptorCurve = new OC.BRepAdaptor_Curve(myEdge);
-                 } catch(e) {
-                    adaptorCurve = new OC.BRepAdaptor_Curve();
-                    adaptorCurve.Initialize(myEdge);
-                 }
-            } else {
-                 // Try numbered
-                 for (let i = 1; i <= 5; i++) {
-                    if (OC[`BRepAdaptor_Curve_${i}`]) {
-                        try {
-                            adaptorCurve = new OC[`BRepAdaptor_Curve_${i}`](myEdge);
-                        } catch(e) {
-                            adaptorCurve = new OC[`BRepAdaptor_Curve_${i}`]();
-                            adaptorCurve.Initialize(myEdge);
-                        }
-                        break;
-                    }
-                 }
-            }
-            if (!adaptorCurve) {
-                 // Fallback to createInstance helper which does the loop
-                 // But createInstance might try constructor(args) and fail
-                 // So let's try createInstance for empty, then Initialize
-                 try {
-                    adaptorCurve = createInstance(OC, "BRepAdaptor_Curve");
-                    adaptorCurve.Initialize(myEdge);
-                 } catch(e) {
-                    // Try one last time with constructor args via createInstance
-                    adaptorCurve = createInstance(OC, "BRepAdaptor_Curve", myEdge);
-                 }
-            }
-        } catch(e) {
-            // console.error("BRepAdaptor_Curve instantiation failed:", e); // Suppress log spam
-            // SKIP EDGE PROCESSING instead of failing completely?
-            // If we can't adapt the curve, we can't tessellate the edge line.
-            // We can continue to the next edge.
-            return; 
-        }
-
-        let tangDef;
-        try {
-            tangDef = new OC.GCPnts_TangentialDeflection(adaptorCurve, linearDeflection, 0.1);
-        } catch(e) {
-            // Try fallback
+    /**
+     * Attempts to get PolygonOnTriangulation using numbered OCCT binding variants.
+     * The JS bindings expose these as _1, _2, _3 instead of overloaded functions.
+     */
+    const tryGetPolygonOnTriangulation = (edge: any, triHandle: any, location: any): any => {
+        const variants = [
+            () => OC.BRep_Tool.PolygonOnTriangulation_1?.(edge, triHandle, location),
+            () => OC.BRep_Tool.PolygonOnTriangulation_2?.(edge, triHandle),
+            () => OC.BRep_Tool.PolygonOnTriangulation_3?.(edge, triHandle, location)
+        ];
+        
+        for (const tryVariant of variants) {
             try {
-                tangDef = createInstance(OC, "GCPnts_TangentialDeflection", adaptorCurve, linearDeflection, 0.1);
-            } catch (e2) {
-                 // GCPnts_TangentialDeflection might also need Initialize pattern
-                 // GCPnts_TangentialDeflection(const Adaptor3d_Curve& C, const Standard_Real AngularDeflection, const Standard_Real CurvatureDeflection, const Standard_Integer MinimumOfPoints = 2, const Standard_Real Utol = 1.0e-9, const Standard_Real MinLen = 1.0e-7)
-                 console.error("GCPnts_TangentialDeflection failed", e2);
-                 throw e2;
+                const result = tryVariant();
+                if (result && (!result.IsNull || !result.IsNull())) return result;
+            } catch { /* Try next variant */ }
+        }
+        return null;
+    };
+
+    /**
+     * Fallback edge extraction: samples points along the BRep curve.
+     * Used when PolygonOnTriangulation is unavailable (shouldn't happen often).
+     * Note: This won't align perfectly with mesh faces.
+     */
+    const extractEdgeByFallback = (edge: any): number[] => {
+        const vertices: number[] = [];
+        
+        let aLocation;
+        try { aLocation = new OC.TopLoc_Location(); }
+        catch { aLocation = createInstance(OC, "TopLoc_Location"); }
+
+        // Create curve adaptor (handles different OCCT binding patterns)
+        let curve = null;
+        if (OC.BRepAdaptor_Curve_2) {
+            curve = new OC.BRepAdaptor_Curve_2(edge);
+        } else if (OC.BRepAdaptor_Curve_1) {
+            curve = new OC.BRepAdaptor_Curve_1();
+            curve.Initialize_1?.(edge) || curve.Initialize?.(edge);
+        } else if (OC.BRepAdaptor_Curve) {
+            try { curve = new OC.BRepAdaptor_Curve(edge); }
+            catch {
+                curve = new OC.BRepAdaptor_Curve();
+                curve.Initialize_1?.(edge) || curve.Initialize?.(edge);
             }
         }
+
+        if (!curve) throw new Error('Could not create BRepAdaptor_Curve');
+
+        // Get parameter range and estimate arc length
+        const first = curve.FirstParameter();
+        const last = curve.LastParameter();
+        const range = Math.abs(last - first);
         
-        const startVertexIndex = edgeVertices.length / 3;
-        let vertexCount = 0;
+        let length = 0;
+        for (let s = 0; s < 10; s++) {
+            const pt1 = curve.Value(first + (s / 10) * range);
+            const pt2 = curve.Value(first + ((s + 1) / 10) * range);
+            length += Math.sqrt(
+                (pt2.X() - pt1.X()) ** 2 +
+                (pt2.Y() - pt1.Y()) ** 2 +
+                (pt2.Z() - pt1.Z()) ** 2
+            );
+        }
 
-        // Extract points along the curve
-        // We create line segments: (P1, P2), (P2, P3), etc.
-        const nbPoints = tangDef.NbPoints();
-        if (nbPoints > 1) {
-            for(let j = 1; j < nbPoints; j++) {
-                let p1 = tangDef.Value(j).Transformed(aLocation.Transformation());
-                let p2 = tangDef.Value(j+1).Transformed(aLocation.Transformation());
+        // Sample based on arc length and deflection tolerance
+        const numSegs = Math.max(2, Math.ceil(length / linearDeflection));
+        const step = range / numSegs;
+        const transform = aLocation.Transformation();
 
-                edgeVertices.push(p1.X(), p1.Y(), p1.Z());
-                edgeVertices.push(p2.X(), p2.Y(), p2.Z());
+        for (let j = 0; j < numSegs; j++) {
+            const p1 = curve.Value(first + j * step).Transformed(transform);
+            const p2 = curve.Value(first + (j + 1) * step).Transformed(transform);
+            vertices.push(p1.X(), p1.Y(), p1.Z(), p2.X(), p2.Y(), p2.Z());
+        }
+
+        return vertices;
+    };
+
+    // Process each unique BRep edge
+    ForEachEdge(OC, shape, (edgeIndex, myEdge) => {
+        let foundPolygon = false;
+
+        // Search face triangulations for this edge's polygon data
+        for (const triData of faceTriangulations) {
+            try {
+                let edgeLocation;
+                try { edgeLocation = new OC.TopLoc_Location(); }
+                catch { edgeLocation = createInstance(OC, "TopLoc_Location"); }
+
+                // Get polygon indices for this edge on this face
+                const polyOnTri = tryGetPolygonOnTriangulation(
+                    myEdge, triData.triangulationHandle, edgeLocation
+                );
                 
-                // Both vertices of this segment belong to edgeIndex
-                edgeIds.push(edgeIndex);
-                edgeIds.push(edgeIndex);
+                if (!polyOnTri || polyOnTri.IsNull?.()) continue;
 
-                // For the "globalEdgeIndices" approach in the reference (optional but good for highlighting)
-                // We just push the edge index twice
-                globalEdgeIndices.push(edgeIndex);
-                globalEdgeIndices.push(edgeIndex);
-                
-                vertexCount += 2;
+                // Unwrap handle and get node indices array
+                const polygon = polyOnTri.get?.() || polyOnTri;
+                if (!polygon) continue;
+
+                let nodes = polygon.Nodes?.();
+                if (nodes?.get) nodes = nodes.get();
+                if (!nodes) continue;
+
+                const nbNodes = nodes.Length?.() || (nodes.Upper() - nodes.Lower() + 1);
+                const lower = nodes.Lower?.() || 1;
+                if (nbNodes < 2) continue;
+
+                // Extract vertex positions from face triangulation using indices
+                const transform = triData.location.Transformation();
+
+                for (let j = 0; j < nbNodes - 1; j++) {
+                    const idx1 = nodes.Value(lower + j);
+                    const idx2 = nodes.Value(lower + j + 1);
+
+                    const p1 = getNodeFromTriangulation(triData, idx1);
+                    const p2 = getNodeFromTriangulation(triData, idx2);
+                    if (!p1 || !p2) continue;
+
+                    const pt1 = p1.Transformed(transform);
+                    const pt2 = p2.Transformed(transform);
+
+                    edgeVertices.push(pt1.X(), pt1.Y(), pt1.Z());
+                    edgeVertices.push(pt2.X(), pt2.Y(), pt2.Z());
+                    edgeIds.push(edgeIndex, edgeIndex);
+                }
+
+                foundPolygon = true;
+                edgesUsingPolyOnTri++;
+                break; // Found polygon for this edge
+
+            } catch { continue; }
+        }
+
+        // Fallback to curve sampling if PolygonOnTriangulation unavailable
+        if (!foundPolygon) {
+            try {
+                const verts = extractEdgeByFallback(myEdge);
+                for (const v of verts) edgeVertices.push(v);
+                for (let i = 0; i < verts.length / 3; i++) edgeIds.push(edgeIndex);
+                edgesUsingFallback++;
+            } catch (e: any) {
+                edgeProcessingErrors.push(`Edge ${edgeIndex}: ${e.message || e}`);
             }
         }
-        
-        edgeMetadata[edgeIndex] = { start: startVertexIndex, count: vertexCount };
     });
+
+    // Log summary
+    console.log(`Edges: ${edgesUsingPolyOnTri} aligned, ${edgesUsingFallback} fallback, ${edgeProcessingErrors.length} errors`);
+    if (edgeProcessingErrors.length > 0) {
+        console.warn('Edge extraction errors:', edgeProcessingErrors.slice(0, 3));
+    }
+
+    // =========================================================================
+    // 6. VERTEX EXTRACTION
+    // =========================================================================
+    // Extract BRep vertex positions using BRep_Tool::Pnt
+    // =========================================================================
+
+    const vertexPositions: number[] = [];
+    let vertexCount = 0;
+
+    ForEachVertex(OC, shape, (_vertexIndex, myVertex) => {
+        try {
+            // Get the 3D point for this vertex using BRep_Tool::Pnt
+            let pnt = null;
+            
+            if (OC.BRep_Tool.Pnt) {
+                pnt = OC.BRep_Tool.Pnt(myVertex);
+            } else if (OC.BRep_Tool.Pnt_1) {
+                pnt = OC.BRep_Tool.Pnt_1(myVertex);
+            } else if (OC.BRep_Tool_1?.Pnt) {
+                pnt = OC.BRep_Tool_1.Pnt(myVertex);
+            }
+
+            if (pnt) {
+                vertexPositions.push(pnt.X(), pnt.Y(), pnt.Z());
+                vertexCount++;
+            }
+        } catch (e) {
+            // Skip vertices that fail to extract
+        }
+    });
+
+    console.log(`Vertices: ${vertexCount} extracted`);
 
     // Cleanup
     reader.delete();
@@ -576,10 +765,12 @@ const convertStepToMesh = async (fileBuffer: ArrayBuffer, linearDeflection: numb
     const facePosArray = new Float32Array(faceVertices);
     const faceNormArray = new Float32Array(faceNormals);
     const faceIndArray = new Uint32Array(faceIndices);
-    const faceIdArray = new Float32Array(faceIds); // Float for shader attribute compatibility
+    const faceIdArray = new Float32Array(faceIds);
 
     const edgePosArray = new Float32Array(edgeVertices);
     const edgeIdArray = new Float32Array(edgeIds);
+
+    const vertexPosArray = new Float32Array(vertexPositions);
 
     return {
         faces: {
@@ -591,6 +782,9 @@ const convertStepToMesh = async (fileBuffer: ArrayBuffer, linearDeflection: numb
         edges: {
             positions: edgePosArray,
             ids: edgeIdArray
+        },
+        vertices: {
+            positions: vertexPosArray
         }
     };
 
@@ -615,7 +809,8 @@ ctx.onmessage = async (event: MessageEvent) => {
         result.faces.indices.buffer,
         result.faces.ids.buffer,
         result.edges.positions.buffer,
-        result.edges.ids.buffer
+        result.edges.ids.buffer,
+        result.vertices.positions.buffer
       ];
 
       ctx.postMessage({ type: 'SUCCESS', payload: result, id }, transferables);
