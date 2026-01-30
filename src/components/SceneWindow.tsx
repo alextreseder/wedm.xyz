@@ -697,8 +697,10 @@ const SceneWindow: React.FC = () => {
       faceGeo.setAttribute('color', new THREE.BufferAttribute(faceColors, 3));
 
       const mesh = new THREE.Mesh(faceGeo, matcapMaterial);
+      mesh.name = 'brepFaces';
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      mesh.visible = storeRef.current.mesh.visibility.faces;
       mainObject.add(mesh);
 
       // 2. Build Edge Lines (wireframe)
@@ -723,31 +725,112 @@ const SceneWindow: React.FC = () => {
           });
           
           const lines = new THREE.LineSegments(edgeGeo, lineMat);
+          lines.name = 'brepEdges';
           lines.renderOrder = 1;
+          lines.visible = storeRef.current.mesh.visibility.edges;
           mainObject.add(lines);
       }
 
-      // 3. Auto-orient model based on land face
+      // 3. Build Vertex Markers (small dots at each BRep vertex)
+      if (meshData.vertices && meshData.vertices.positions.length > 0) {
+          const vertexGeo = new THREE.BufferGeometry();
+          vertexGeo.setAttribute('position', new THREE.BufferAttribute(meshData.vertices.positions, 3));
+          
+          const vertexMat = new THREE.PointsMaterial({
+              color: 0x00ffff,
+              size: 3,
+              sizeAttenuation: false,  // Constant screen size
+              depthTest: false
+          });
+          
+          const vertexPoints = new THREE.Points(vertexGeo, vertexMat);
+          vertexPoints.name = 'brepVertices';
+          vertexPoints.renderOrder = 2;
+          vertexPoints.visible = storeRef.current.mesh.visibility.vertices;
+          mainObject.add(vertexPoints);
+      }
+
+      // 4. Build Tessellation Lines (mesh triangulation)
+      // Convert indexed triangles to line segments
+      if (meshData.faces.indices.length > 0) {
+          const tessLines: number[] = [];
+          const positions = meshData.faces.positions;
+          const indices = meshData.faces.indices;
+          
+          for (let i = 0; i < indices.length; i += 3) {
+              const i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
+              
+              // Edge 0-1
+              tessLines.push(positions[i0*3], positions[i0*3+1], positions[i0*3+2]);
+              tessLines.push(positions[i1*3], positions[i1*3+1], positions[i1*3+2]);
+              // Edge 1-2
+              tessLines.push(positions[i1*3], positions[i1*3+1], positions[i1*3+2]);
+              tessLines.push(positions[i2*3], positions[i2*3+1], positions[i2*3+2]);
+              // Edge 2-0
+              tessLines.push(positions[i2*3], positions[i2*3+1], positions[i2*3+2]);
+              tessLines.push(positions[i0*3], positions[i0*3+1], positions[i0*3+2]);
+          }
+          
+          const tessGeo = new THREE.BufferGeometry();
+          tessGeo.setAttribute('position', new THREE.Float32BufferAttribute(tessLines, 3));
+          
+          const tessMat = new THREE.LineBasicMaterial({
+              color: 0x444444,  // Medium-dark grey
+              transparent: true,
+              opacity: 0.5
+          });
+          
+          const tessLineSegments = new THREE.LineSegments(tessGeo, tessMat);
+          tessLineSegments.name = 'tessellation';
+          tessLineSegments.renderOrder = 0;
+          tessLineSegments.visible = storeRef.current.mesh.visibility.tessellation;
+          mainObject.add(tessLineSegments);
+      }
+
+      // 5. Auto-orient model based on land face
       // Align the largest land face normal to (0, 0, -1) and position so the face sits ON the ground at Z=0
       if (meshData.adjacency?.landFacesData && meshData.adjacency.landFacesData.length > 0) {
           const largestLandFace = meshData.adjacency.landFacesData[0]; // Already sorted by area, then index
           const { normal } = largestLandFace;
           
           // Current face normal
-          const faceNormal = new THREE.Vector3(normal.x, normal.y, normal.z).normalize();
+          const faceNormal = new THREE.Vector3(normal.x, normal.y, normal.z);
+          const normalLength = faceNormal.length();
           
-          // Target normal: we want the land face pointing DOWN (0, 0, -1)
-          const targetNormal = new THREE.Vector3(0, 0, -1);
+          // Skip orientation if normal is invalid (zero vector)
+          if (normalLength > 0.001) {
+              faceNormal.normalize();
+              
+              // Target normal: we want the land face pointing DOWN (0, 0, -1)
+              const targetNormal = new THREE.Vector3(0, 0, -1);
+              
+              // Compute rotation quaternion to align faceNormal to targetNormal
+              const quaternion = new THREE.Quaternion();
+              
+              // Handle edge cases for nearly parallel/anti-parallel vectors
+              const dot = faceNormal.dot(targetNormal);
+              
+              if (dot > 0.9999) {
+                  // Vectors are nearly identical - no rotation needed
+                  quaternion.identity();
+              } else if (dot < -0.9999) {
+                  // Vectors are nearly opposite - rotate 180° around X axis
+                  quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
+              } else {
+                  // General case
+                  quaternion.setFromUnitVectors(faceNormal, targetNormal);
+              }
+              
+              // Apply rotation to mainObject
+              mainObject.quaternion.copy(quaternion);
+              mainObject.updateMatrixWorld(true);
+              
+              console.log(`Auto-oriented: land face ${largestLandFace.index} (area=${largestLandFace.area.toFixed(2)}) normal=(${normal.x.toFixed(3)},${normal.y.toFixed(3)},${normal.z.toFixed(3)}), dot=${dot.toFixed(4)}`);
+          } else {
+              console.warn(`Auto-orient skipped: invalid normal for land face ${largestLandFace.index}`);
+          }
           
-          // Compute rotation quaternion to align faceNormal to targetNormal
-          const quaternion = new THREE.Quaternion();
-          quaternion.setFromUnitVectors(faceNormal, targetNormal);
-          
-          // Apply rotation to mainObject
-          mainObject.quaternion.copy(quaternion);
-          mainObject.updateMatrixWorld(true);
-          
-          // After rotation, find the minimum Z of the entire model (bounding box)
+          // After rotation (or if skipped), find the minimum Z of the entire model (bounding box)
           // This ensures the model sits ON the ground, not through it
           const box = new THREE.Box3().setFromObject(mainObject);
           const minZ = box.min.z;
@@ -756,7 +839,7 @@ const SceneWindow: React.FC = () => {
           mainObject.position.z = -minZ;
           mainObject.updateMatrixWorld(true);
           
-          console.log(`Auto-oriented: land face ${largestLandFace.index} (area=${largestLandFace.area.toFixed(2)}) normal aligned to (0,0,-1), model bottom at Z=0`);
+          console.log(`Model positioned: minZ was ${minZ.toFixed(4)}, now at Z=0`);
       }
 
       // Center camera on model
@@ -766,6 +849,27 @@ const SceneWindow: React.FC = () => {
       controls.update();
       markDirty();
     });
+
+    // Subscribe to visibility changes
+    const unsubscribeVisibility = useStore.subscribe(
+      (state) => state.mesh.visibility,
+      (visibility) => {
+        // Update visibility of scene objects
+        mainObject.traverse((child) => {
+          if (child.name === 'brepFaces') {
+            child.visible = visibility.faces;
+          } else if (child.name === 'brepEdges') {
+            child.visible = visibility.edges;
+          } else if (child.name === 'brepVertices') {
+            child.visible = visibility.vertices;
+          } else if (child.name === 'tessellation') {
+            child.visible = visibility.tessellation;
+          }
+        });
+        markDirty();
+      },
+      { equalityFn: (a, b) => JSON.stringify(a) === JSON.stringify(b) }
+    );
 
     // Animation Loop
     const animate = () => {
@@ -796,6 +900,7 @@ const SceneWindow: React.FC = () => {
 
     return () => {
       unsubscribe();
+      unsubscribeVisibility();
       containerRef.current?.removeEventListener('mousemove', onMouseMove);
       containerRef.current?.removeEventListener('click', onClick);
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);

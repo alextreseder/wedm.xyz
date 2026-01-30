@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { subscribeWithSelector } from 'zustand/middleware';
 import { initialProjectState } from './projectState';
 import type { ProjectState } from './projectState';
 
@@ -69,6 +70,10 @@ interface ProjectStore extends ProjectState {
     /** Set the proximity threshold for edge/vertex detection */
     setProximityThreshold: (type: 'edge' | 'vertex', pixels: number) => void;
 
+    // --- Visibility Actions ---
+    /** Set visibility of a specific element type */
+    setVisibility: (type: 'faces' | 'edges' | 'vertices' | 'tessellation', visible: boolean) => void;
+
     // --- BRep Feature Actions ---
     /** Set land faces (top/bottom) identified from adjacency analysis */
     setLandFaces: (topFaceId: number | null, bottomFaceId: number | null) => void;
@@ -80,7 +85,7 @@ interface ProjectStore extends ProjectState {
     setBrepStats: (stats: { numFaces: number; numEdges: number; numVertices: number }) => void;
 }
 
-export const useStore = create<ProjectStore>((set, get) => ({
+export const useStore = create<ProjectStore>()(subscribeWithSelector((set, get) => ({
     ...initialProjectState,
 
     // Transient state initialization
@@ -284,6 +289,17 @@ export const useStore = create<ProjectStore>((set, get) => ({
     }),
 
     // =========================================================================
+    // VISIBILITY ACTIONS
+    // =========================================================================
+
+    setVisibility: (type, visible) => set((state) => ({
+        mesh: {
+            ...state.mesh,
+            visibility: { ...state.mesh.visibility, [type]: visible }
+        }
+    })),
+
+    // =========================================================================
     // BREP FEATURE ACTIONS
     // =========================================================================
 
@@ -319,4 +335,4 @@ export const useStore = create<ProjectStore>((set, get) => ({
             }
         }
     }))
-}));
+})));

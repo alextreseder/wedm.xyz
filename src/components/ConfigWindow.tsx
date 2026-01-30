@@ -29,9 +29,7 @@ const ConfigWindow: React.FC = () => {
       pages: [
         { title: 'CAM' },
         { title: 'Spark' },
-        { title: 'Cost' },
-        { title: 'Kernel' },
-        { title: 'Drill' },
+        { title: 'Graphics' },
         { title: 'Dev' },
       ],
     }) as any;
@@ -309,27 +307,41 @@ const ConfigWindow: React.FC = () => {
 
     const simInterval = setInterval(simulateScope, 20); 
 
-    // --- Cost Tab ---
-    const costPage = tab.pages[2];
-    costPage.addBinding(bindingParams.cost, 'materialCost', { label: 'Material $/kg' })
-        .on('change', (ev: any) => useStore.getState().setCostParam('materialCost', ev.value));
+    // --- Graphics Tab ---
+    const graphicsPage = tab.pages[2];
+    
+    // Visibility Folder
+    const visibilityFolder = graphicsPage.addFolder({ title: 'Visibility', expanded: true });
+    
+    // Create local binding for visibility checkboxes
+    const visibilityParams = { ...state.mesh.visibility };
+    
+    visibilityFolder.addBinding(visibilityParams, 'faces', { label: 'Face' })
+        .on('change', (ev: any) => useStore.getState().setVisibility('faces', ev.value));
         
-    costPage.addBinding(bindingParams.cost, 'machineRate', { label: 'Machine $/hr' })
-        .on('change', (ev: any) => useStore.getState().setCostParam('machineRate', ev.value));
+    visibilityFolder.addBinding(visibilityParams, 'edges', { label: 'Edge' })
+        .on('change', (ev: any) => useStore.getState().setVisibility('edges', ev.value));
+        
+    visibilityFolder.addBinding(visibilityParams, 'vertices', { label: 'Vertex' })
+        .on('change', (ev: any) => useStore.getState().setVisibility('vertices', ev.value));
+        
+    visibilityFolder.addBinding(visibilityParams, 'tessellation', { label: 'Tessellation' })
+        .on('change', (ev: any) => useStore.getState().setVisibility('tessellation', ev.value));
+    
+    visibilityFolder.addBlade({ view: 'separator' });
+    
+    visibilityFolder.addButton({ title: 'Show Land Faces' }).on('click', () => {
+        const { topPlaneId, bottomPlaneId } = useStore.getState().brep.features;
+        console.log('Land Faces:', { top: topPlaneId, bottom: bottomPlaneId });
+    });
+    
+    visibilityFolder.addButton({ title: 'Show Wall Faces' }).on('click', () => {
+        const { walls } = useStore.getState().brep.features;
+        console.log('Wall Faces:', walls);
+    });
 
-    // --- Kernel Tab ---
-    const kernelPage = tab.pages[3];
-    const appVersion = useStore.getState().metadata.appVersion;
-    
-    // Create a local object for version since it's in metadata not params
-    const kernelLocal = { version: appVersion, ...bindingParams.kernel };
-    
-    kernelPage.addBinding(kernelLocal, 'version', { readonly: true });
-    
-    kernelPage.addBinding(bindingParams.kernel, 'debugMode')
-        .on('change', (ev: any) => useStore.getState().setKernelParam('debugMode', ev.value));
-        
-    kernelPage.addBinding(bindingParams.kernel, 'meshResolution', {
+    // Mesh Resolution (kept in Graphics)
+    graphicsPage.addBinding(bindingParams.kernel, 'meshResolution', {
         min: 0.1,
         max: 10.0,
         label: 'Mesh Resolution',
@@ -346,19 +358,8 @@ const ConfigWindow: React.FC = () => {
         }, 500); // 500ms delay
     });
 
-    // --- Drill Tab ---
-    const drillPage = tab.pages[4];
-    drillPage.addBinding(bindingParams.drill, 'diameter', { min: 0.1, max: 20 })
-        .on('change', (ev: any) => useStore.getState().setDrillParam('diameter', ev.value));
-        
-    drillPage.addBinding(bindingParams.drill, 'depth', { min: 0.1, max: 100 })
-        .on('change', (ev: any) => useStore.getState().setDrillParam('depth', ev.value));
-        
-    drillPage.addBinding(bindingParams.drill, 'peck')
-        .on('change', (ev: any) => useStore.getState().setDrillParam('peck', ev.value));
-
     // --- Dev Tab ---
-    const devPage = tab.pages[5];
+    const devPage = tab.pages[3];
     
     devPage.addButton({ title: 'Log State' }).on('click', () => {
         console.log('Current Store State:', useStore.getState());
@@ -373,6 +374,22 @@ const ConfigWindow: React.FC = () => {
             console.error('Failed to copy state:', err);
         });
     });
+
+    // Cost Folder (moved from Cost tab)
+    const costFolder = devPage.addFolder({ title: 'Cost', expanded: false });
+    costFolder.addBinding(bindingParams.cost, 'materialCost', { label: 'Material $/kg' })
+        .on('change', (ev: any) => useStore.getState().setCostParam('materialCost', ev.value));
+    costFolder.addBinding(bindingParams.cost, 'machineRate', { label: 'Machine $/hr' })
+        .on('change', (ev: any) => useStore.getState().setCostParam('machineRate', ev.value));
+
+    // Drill Folder (moved from Drill tab)
+    const drillFolder = devPage.addFolder({ title: 'Drill', expanded: false });
+    drillFolder.addBinding(bindingParams.drill, 'diameter', { min: 0.1, max: 20, label: 'Diameter' })
+        .on('change', (ev: any) => useStore.getState().setDrillParam('diameter', ev.value));
+    drillFolder.addBinding(bindingParams.drill, 'depth', { min: 0.1, max: 100, label: 'Depth' })
+        .on('change', (ev: any) => useStore.getState().setDrillParam('depth', ev.value));
+    drillFolder.addBinding(bindingParams.drill, 'peck', { label: 'Peck' })
+        .on('change', (ev: any) => useStore.getState().setDrillParam('peck', ev.value));
 
     return () => {
       clearInterval(simInterval);

@@ -142,12 +142,12 @@ const TopBar: React.FC = () => {
       </div>
 
       {/* Right section: Demo button */}
-      <div>
+      <div style={{ display: 'flex', alignItems: 'center' }}>
         <button 
           style={{
-            backgroundColor: '#2a4a2a',
+            backgroundColor: '#333',
             color: 'white',
-            border: '1px solid #4a6a4a',
+            border: '1px solid #555',
             borderRadius: '3px',
             padding: '2px 8px',
             cursor: 'pointer',

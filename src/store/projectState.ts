@@ -117,6 +117,16 @@ export interface ProjectState {
         materialColor: string;     // Hex color code
         
         /**
+         * Visibility Settings: Controls what geometry is displayed
+         */
+        visibility: {
+            faces: boolean;        // Show BRep faces (the solid mesh)
+            edges: boolean;        // Show BRep edges (wireframe)
+            vertices: boolean;     // Show vertex markers
+            tessellation: boolean; // Show mesh triangulation lines
+        };
+        
+        /**
          * Selection Settings: Controls which entity types can be selected
          * and the screen-space proximity thresholds for detection.
          */
@@ -243,6 +253,12 @@ export const initialProjectState: ProjectState = {
         showGrid: true,
         opacity: 1.0,
         materialColor: '#f5f5f5', // Matches current matcap base
+        visibility: {
+            faces: true,       // Show BRep faces (solid mesh) by default
+            edges: true,       // Show BRep edges (wireframe) by default
+            vertices: false,   // Hide vertex markers by default
+            tessellation: false // Hide tessellation lines by default
+        },
         selection: {
             faceEnabled: true,
             edgeEnabled: true,
