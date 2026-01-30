@@ -68,6 +68,16 @@ interface ProjectStore extends ProjectState {
     
     /** Set the proximity threshold for edge/vertex detection */
     setProximityThreshold: (type: 'edge' | 'vertex', pixels: number) => void;
+
+    // --- BRep Feature Actions ---
+    /** Set land faces (top/bottom) identified from adjacency analysis */
+    setLandFaces: (topFaceId: number | null, bottomFaceId: number | null) => void;
+    
+    /** Set wall faces (the shell to be cut) */
+    setWallFaces: (walls: number[]) => void;
+    
+    /** Set BRep statistics */
+    setBrepStats: (stats: { numFaces: number; numEdges: number; numVertices: number }) => void;
 }
 
 export const useStore = create<ProjectStore>((set, get) => ({
@@ -271,5 +281,42 @@ export const useStore = create<ProjectStore>((set, get) => ({
                 selection: { ...state.mesh.selection, [key]: pixels }
             }
         };
-    })
+    }),
+
+    // =========================================================================
+    // BREP FEATURE ACTIONS
+    // =========================================================================
+
+    setLandFaces: (topFaceId, bottomFaceId) => set((state) => ({
+        brep: {
+            ...state.brep,
+            features: {
+                ...state.brep.features,
+                topPlaneId: topFaceId,
+                bottomPlaneId: bottomFaceId
+            }
+        }
+    })),
+
+    setWallFaces: (walls) => set((state) => ({
+        brep: {
+            ...state.brep,
+            features: {
+                ...state.brep.features,
+                walls: walls
+            }
+        }
+    })),
+
+    setBrepStats: (stats) => set((state) => ({
+        brep: {
+            ...state.brep,
+            stats: {
+                ...state.brep.stats,
+                numFaces: stats.numFaces,
+                numEdges: stats.numEdges,
+                numVertices: stats.numVertices
+            }
+        }
+    }))
 }));

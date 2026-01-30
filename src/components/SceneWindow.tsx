@@ -54,12 +54,13 @@ const SceneWindow: React.FC = () => {
     scene.fog = new THREE.Fog(backgroundColor, 200, 600);
     sceneRef.current = scene;
 
-    // Initialize Camera
+    // Initialize Camera (Z-up coordinate system)
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
     const camera = new THREE.PerspectiveCamera(45, width / height, 1, 5000);
-    camera.position.set(50, 100, 150);
-    camera.lookAt(0, 45, 0);
+    camera.position.set(100, -150, 100);  // Z-up: looking from +X, -Y, +Z
+    camera.up.set(0, 0, 1);  // Z is up
+    camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
     // Initialize Renderer
@@ -70,9 +71,9 @@ const SceneWindow: React.FC = () => {
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // Initialize Controls
+    // Initialize Controls (Z-up)
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 45, 0);
+    controls.target.set(0, 0, 0);
     controls.panSpeed = 2;
     controls.zoomSpeed = 1;
     controls.enableDamping = false;
@@ -128,7 +129,7 @@ const SceneWindow: React.FC = () => {
       vertexColors: true // Enable vertex colors for highlighting
     });
 
-    // Create the ground mesh
+    // Create the ground mesh (Z-up: ground is XY plane at Z=0)
     const groundMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(2000, 2000),
       new THREE.MeshPhongMaterial({
@@ -140,22 +141,22 @@ const SceneWindow: React.FC = () => {
         polygonOffsetUnits: 1.0
       })
     );
-    groundMesh.position.y = -0.1;
-    groundMesh.rotation.x = -Math.PI / 2;
+    groundMesh.position.z = 0;  // Ground at Z=0
+    // PlaneGeometry is XY by default, perfect for Z-up
     groundMesh.receiveShadow = true;
     scene.add(groundMesh);
 
-    // Create the Ground Grid
+    // Create the Ground Grid (Z-up: grid on XY plane at Z=0)
     const grid = new THREE.GridHelper(2000, 20, 0xcccccc, 0xcccccc);
-    grid.position.y = -0.01;
+    grid.rotation.x = Math.PI / 2;  // Rotate from XZ to XY plane
+    grid.position.z = 0.01;  // Slightly above ground to prevent z-fighting
     grid.material.opacity = 0.3;
     grid.material.transparent = true;
     scene.add(grid);
 
-    // Main Object Group
+    // Main Object Group (Z-up, no rotation)
     const mainObject = new THREE.Group();
     mainObject.name = "shape";
-    mainObject.rotation.x = -Math.PI / 2;
     scene.add(mainObject);
 
     // Vertex highlight sphere (screen-space sized)
@@ -648,9 +649,34 @@ const SceneWindow: React.FC = () => {
           console.log(`Loaded ${meshData.vertices.positions.length / 3} vertices for selection`);
       }
 
-      // console.log('Building geometry from manual mesh data...');
-      // console.log('Faces:', meshData.faces.positions.length / 3, 'vertices');
-      // console.log('Edges:', meshData.edges.positions.length / 3, 'vertices');
+      // Store BRep stats and land faces from adjacency analysis
+      if (meshData.adjacency) {
+          const { faceCount, landFaces } = meshData.adjacency;
+          const edgeCount = new Set(
+              Array.from(meshData.edges.ids).map(id => id)
+          ).size;
+          const vertexCount = meshData.vertices.positions.length / 3;
+          
+          // Update BRep statistics
+          storeRef.current.setBrepStats({
+              numFaces: faceCount,
+              numEdges: edgeCount,
+              numVertices: vertexCount
+          });
+          
+          // Store land faces (top 2 most-connected faces)
+          const topFace = landFaces[0] ?? null;
+          const bottomFace = landFaces[1] ?? null;
+          storeRef.current.setLandFaces(topFace, bottomFace);
+          
+          // Store wall faces (shell to be cut)
+          const wallFaces = meshData.adjacency.wallFaces || [];
+          storeRef.current.setWallFaces(wallFaces);
+          
+          console.log(`BRep stats: ${faceCount} faces, ${edgeCount} edges, ${vertexCount} vertices`);
+          console.log(`Land faces identified: top=${topFace}, bottom=${bottomFace}`);
+          console.log(`Wall faces (shell): ${wallFaces.length} faces`);
+      }
 
       // 1. Build Face Mesh
       if (meshData.faces.positions.length === 0) {
@@ -701,7 +727,39 @@ const SceneWindow: React.FC = () => {
           mainObject.add(lines);
       }
 
-      // Center camera
+      // 3. Auto-orient model based on land face
+      // Align the largest land face normal to (0, 0, -1) and position so the face sits ON the ground at Z=0
+      if (meshData.adjacency?.landFacesData && meshData.adjacency.landFacesData.length > 0) {
+          const largestLandFace = meshData.adjacency.landFacesData[0]; // Already sorted by area, then index
+          const { normal } = largestLandFace;
+          
+          // Current face normal
+          const faceNormal = new THREE.Vector3(normal.x, normal.y, normal.z).normalize();
+          
+          // Target normal: we want the land face pointing DOWN (0, 0, -1)
+          const targetNormal = new THREE.Vector3(0, 0, -1);
+          
+          // Compute rotation quaternion to align faceNormal to targetNormal
+          const quaternion = new THREE.Quaternion();
+          quaternion.setFromUnitVectors(faceNormal, targetNormal);
+          
+          // Apply rotation to mainObject
+          mainObject.quaternion.copy(quaternion);
+          mainObject.updateMatrixWorld(true);
+          
+          // After rotation, find the minimum Z of the entire model (bounding box)
+          // This ensures the model sits ON the ground, not through it
+          const box = new THREE.Box3().setFromObject(mainObject);
+          const minZ = box.min.z;
+          
+          // Translate so the model's bottom is at Z=0
+          mainObject.position.z = -minZ;
+          mainObject.updateMatrixWorld(true);
+          
+          console.log(`Auto-oriented: land face ${largestLandFace.index} (area=${largestLandFace.area.toFixed(2)}) normal aligned to (0,0,-1), model bottom at Z=0`);
+      }
+
+      // Center camera on model
       const box = new THREE.Box3().setFromObject(mainObject);
       const center = box.getCenter(new THREE.Vector3());
       controls.target.copy(center);

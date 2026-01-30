@@ -24,6 +24,19 @@ export interface MeshResult {
     vertices: {
         positions: Float32Array;
     };
+    adjacency: {
+        faceCount: number;
+        adjacencyCounts: number[];  // Adjacency count for each face
+        landFaces: number[];        // Indices of top 2 most-connected faces
+        landFacesData: Array<{
+            index: number;
+            area: number;
+            normal: { x: number, y: number, z: number };
+            centroid: { x: number, y: number, z: number };
+            minZ: number;
+        }>;
+        wallFaces: number[];  // All faces that are not land faces (the shell to be cut)
+    };
 }
 
 /**

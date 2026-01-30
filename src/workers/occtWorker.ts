@@ -757,6 +757,241 @@ const convertStepToMesh = async (fileBuffer: ArrayBuffer, linearDeflection: numb
 
     console.log(`Vertices: ${vertexCount} extracted`);
 
+    // =========================================================================
+    // 7. FACE ADJACENCY GRAPH (AAG) EXTRACTION
+    // =========================================================================
+    // Build adjacency by finding which faces share edges.
+    // Faces with highest adjacency are typically "land" faces (top/bottom).
+    // =========================================================================
+
+    console.log('Building face adjacency graph...');
+
+    // Map: edgeHash -> array of face indices that share this edge
+    const edgeToFaces: Map<number, number[]> = new Map();
+
+    // For each face, find its edges and record the relationship
+    ForEachFace(OC, shape, (faceIndex, myFace) => {
+        // Explore edges of this face
+        let edgeExplorer;
+        try {
+            edgeExplorer = new OC.TopExp_Explorer();
+        } catch(e) {
+            if (OC.TopExp_Explorer_1) edgeExplorer = new OC.TopExp_Explorer_1();
+            else if (OC.TopExp_Explorer_2) edgeExplorer = new OC.TopExp_Explorer_2();
+        }
+        
+        if (!edgeExplorer) return;
+
+        let edgeEnum = OC.TopAbs_EDGE;
+        if (edgeEnum === undefined && OC.TopAbs_ShapeEnum) {
+            edgeEnum = OC.TopAbs_ShapeEnum.TopAbs_EDGE;
+        }
+
+        let shapeEnum = OC.TopAbs_SHAPE;
+        if (shapeEnum === undefined && OC.TopAbs_ShapeEnum) {
+            shapeEnum = OC.TopAbs_ShapeEnum.TopAbs_SHAPE;
+        }
+
+        edgeExplorer.Init(myFace, edgeEnum, shapeEnum);
+
+        for (; edgeExplorer.More(); edgeExplorer.Next()) {
+            let edge = edgeExplorer.Current();
+            let edgeCasted;
+            
+            if (OC.TopoDS.Edge) {
+                edgeCasted = OC.TopoDS.Edge(edge);
+            } else if (OC.TopoDS.Edge_1) {
+                edgeCasted = OC.TopoDS.Edge_1(edge);
+            } else {
+                edgeCasted = edge;
+            }
+
+            const edgeHash = edgeCasted.HashCode(100000000);
+            
+            if (!edgeToFaces.has(edgeHash)) {
+                edgeToFaces.set(edgeHash, []);
+            }
+            const faces = edgeToFaces.get(edgeHash)!;
+            if (!faces.includes(faceIndex)) {
+                faces.push(faceIndex);
+            }
+        }
+        
+        edgeExplorer.delete();
+    });
+
+    // Build face adjacency count: how many unique faces is each face connected to
+    const faceAdjacencyCount: number[] = [];
+    let totalFaces = 0;
+    
+    ForEachFace(OC, shape, (faceIndex) => {
+        faceAdjacencyCount[faceIndex] = 0;
+        totalFaces = Math.max(totalFaces, faceIndex + 1);
+    });
+
+    // For each edge shared by 2 faces, those faces are adjacent
+    const faceAdjacencySet: Set<number>[] = Array.from({ length: totalFaces }, () => new Set());
+    
+    edgeToFaces.forEach((faces) => {
+        if (faces.length === 2) {
+            // Edge shared by exactly 2 faces - they are adjacent
+            faceAdjacencySet[faces[0]].add(faces[1]);
+            faceAdjacencySet[faces[1]].add(faces[0]);
+        }
+    });
+
+    // Convert sets to counts
+    for (let i = 0; i < totalFaces; i++) {
+        faceAdjacencyCount[i] = faceAdjacencySet[i].size;
+    }
+
+    // Find the 2 faces with highest adjacency (land faces)
+    const sortedByAdjacency = faceAdjacencyCount
+        .map((count, index) => ({ index, count }))
+        .sort((a, b) => b.count - a.count);
+
+    const landFaceIndices = sortedByAdjacency.slice(0, 2).map(f => f.index);
+    
+    console.log(`Adjacency analysis: ${totalFaces} faces, land faces: [${landFaceIndices.join(', ')}] with adjacencies [${sortedByAdjacency.slice(0, 2).map(f => f.count).join(', ')}]`);
+
+    // =========================================================================
+    // 8. LAND FACE PROPERTIES (Normal, Area, Centroid)
+    // =========================================================================
+    // Calculate surface area, normal, and centroid for each land face
+    // using the triangulation data (more reliable than OCCT API in JS bindings).
+    // =========================================================================
+
+    interface LandFaceData {
+        index: number;
+        area: number;
+        normal: { x: number, y: number, z: number };
+        centroid: { x: number, y: number, z: number };
+        minZ: number;  // Minimum Z coordinate of the face
+    }
+
+    const landFacesData: LandFaceData[] = [];
+
+    // Compute properties from triangulation data for each land face
+    for (const landFaceIndex of landFaceIndices) {
+        // Collect all vertices and normals for this face from triangulation
+        const faceVerts: { x: number, y: number, z: number }[] = [];
+        const faceNorms: { x: number, y: number, z: number }[] = [];
+        
+        for (let i = 0; i < faceIds.length; i++) {
+            if (faceIds[i] === landFaceIndex) {
+                faceVerts.push({
+                    x: faceVertices[i * 3],
+                    y: faceVertices[i * 3 + 1],
+                    z: faceVertices[i * 3 + 2]
+                });
+                faceNorms.push({
+                    x: faceNormals[i * 3],
+                    y: faceNormals[i * 3 + 1],
+                    z: faceNormals[i * 3 + 2]
+                });
+            }
+        }
+
+        if (faceVerts.length < 3) {
+            console.warn(`Land face ${landFaceIndex}: insufficient vertices (${faceVerts.length})`);
+            continue;
+        }
+
+        // Compute centroid (average of all vertices)
+        let sumX = 0, sumY = 0, sumZ = 0;
+        let minZ = Infinity;
+        for (const v of faceVerts) {
+            sumX += v.x;
+            sumY += v.y;
+            sumZ += v.z;
+            if (v.z < minZ) minZ = v.z;
+        }
+        const centroid = {
+            x: sumX / faceVerts.length,
+            y: sumY / faceVerts.length,
+            z: sumZ / faceVerts.length
+        };
+
+        // Compute average normal
+        let sumNx = 0, sumNy = 0, sumNz = 0;
+        for (const n of faceNorms) {
+            sumNx += n.x;
+            sumNy += n.y;
+            sumNz += n.z;
+        }
+        const normLen = Math.sqrt(sumNx*sumNx + sumNy*sumNy + sumNz*sumNz);
+        const normal = normLen > 0.001 
+            ? { x: sumNx/normLen, y: sumNy/normLen, z: sumNz/normLen }
+            : { x: 0, y: 0, z: 1 };
+
+        // Compute area from triangles
+        // faceIndices contains triangle indices, we need to find triangles for this face
+        let area = 0;
+        // The vertices for this face are contiguous in faceVertices based on faceIds
+        // We need to use the index buffer to find triangles
+        // For simplicity, estimate area from the bounding box or use triangle area sum
+        
+        // Find triangles that belong to this face by checking if all 3 vertices have this faceId
+        for (let t = 0; t < faceIndices.length; t += 3) {
+            const i0 = faceIndices[t];
+            const i1 = faceIndices[t + 1];
+            const i2 = faceIndices[t + 2];
+            
+            // Check if this triangle belongs to the land face
+            if (faceIds[i0] === landFaceIndex && faceIds[i1] === landFaceIndex && faceIds[i2] === landFaceIndex) {
+                // Get triangle vertices
+                const v0 = { x: faceVertices[i0*3], y: faceVertices[i0*3+1], z: faceVertices[i0*3+2] };
+                const v1 = { x: faceVertices[i1*3], y: faceVertices[i1*3+1], z: faceVertices[i1*3+2] };
+                const v2 = { x: faceVertices[i2*3], y: faceVertices[i2*3+1], z: faceVertices[i2*3+2] };
+                
+                // Triangle area = 0.5 * |cross product of two edges|
+                const e1 = { x: v1.x - v0.x, y: v1.y - v0.y, z: v1.z - v0.z };
+                const e2 = { x: v2.x - v0.x, y: v2.y - v0.y, z: v2.z - v0.z };
+                const cross = {
+                    x: e1.y * e2.z - e1.z * e2.y,
+                    y: e1.z * e2.x - e1.x * e2.z,
+                    z: e1.x * e2.y - e1.y * e2.x
+                };
+                const triArea = 0.5 * Math.sqrt(cross.x*cross.x + cross.y*cross.y + cross.z*cross.z);
+                area += triArea;
+            }
+        }
+
+        landFacesData.push({
+            index: landFaceIndex,
+            area: area,
+            normal: normal,
+            centroid: centroid,
+            minZ: minZ
+        });
+
+        console.log(`Land face ${landFaceIndex}: area=${area.toFixed(2)}, normal=(${normal.x.toFixed(3)}, ${normal.y.toFixed(3)}, ${normal.z.toFixed(3)}), centroid=(${centroid.x.toFixed(2)}, ${centroid.y.toFixed(2)}, ${centroid.z.toFixed(2)})`);
+    }
+
+    // Sort land faces by area (largest first), then by index (lower first) as tie-breaker
+    landFacesData.sort((a, b) => {
+        if (Math.abs(b.area - a.area) > 0.001) {
+            return b.area - a.area;  // Larger area first
+        }
+        return a.index - b.index;  // Lower index first as tie-breaker
+    });
+
+    // =========================================================================
+    // 9. WALL FACES (Shell)
+    // =========================================================================
+    // Wall faces are all faces that are NOT land faces.
+    // These are the faces that will be cut in the wire EDM process.
+    // =========================================================================
+
+    const wallFaces: number[] = [];
+    for (let i = 0; i < totalFaces; i++) {
+        if (!landFaceIndices.includes(i)) {
+            wallFaces.push(i);
+        }
+    }
+    
+    console.log(`Wall faces (shell): ${wallFaces.length} faces [${wallFaces.slice(0, 5).join(', ')}${wallFaces.length > 5 ? '...' : ''}]`);
+
     // Cleanup
     reader.delete();
     OC.FS.unlink(fileName);
@@ -785,6 +1020,13 @@ const convertStepToMesh = async (fileBuffer: ArrayBuffer, linearDeflection: numb
         },
         vertices: {
             positions: vertexPosArray
+        },
+        adjacency: {
+            faceCount: totalFaces,
+            adjacencyCounts: faceAdjacencyCount,
+            landFaces: landFaceIndices,  // Top 2 faces with highest adjacency
+            landFacesData: landFacesData, // Detailed data for orientation
+            wallFaces: wallFaces          // All faces that are not land faces (the shell)
         }
     };
 
