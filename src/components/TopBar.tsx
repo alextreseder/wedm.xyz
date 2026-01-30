@@ -19,6 +19,27 @@ const TopBar: React.FC = () => {
     eventBus.emit(EVENTS.MODEL_LOADED, null); // Emit null to clear
   };
 
+  const handleLoadGearDemo = async () => {
+    try {
+      console.log('Loading Gear Demo...');
+      
+      // Fetch the demo file from public folder
+      const response = await fetch('/demos/20T H Gear.step');
+      if (!response.ok) throw new Error('Failed to load demo file');
+      
+      const buffer = await response.arrayBuffer();
+      
+      console.log('Sending to worker for conversion...');
+      const meshResolution = useStore.getState().params.kernel.meshResolution;
+      const meshData = await convertStepToMesh(buffer, meshResolution);
+      
+      console.log('Conversion successful, updating scene...');
+      eventBus.emit(EVENTS.MODEL_LOADED, meshData);
+    } catch (error) {
+      console.error('Error loading demo:', error);
+    }
+  };
+
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -56,10 +77,9 @@ const TopBar: React.FC = () => {
       flexShrink: 0,
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'flex-start', // Align items to the start
+      justifyContent: 'space-between',
       paddingLeft: '10px',
-      paddingRight: '10px',
-      gap: '20px' // Space between title group and button group
+      paddingRight: '10px'
     }}>
       <input
         type="file"
@@ -69,52 +89,73 @@ const TopBar: React.FC = () => {
         onChange={handleFileChange}
       />
       
-      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-        <a 
-          href="https://github.com/alextreseder/wedm.xyz" 
-          target="_blank" 
-          rel="noopener noreferrer"
-          style={{
-            color: 'white',
-            textDecoration: 'underline',
-            fontSize: '12px',
-            fontWeight: 'bold',
-            cursor: 'pointer'
-          }}
-        >
-          WEDM.XYZ
-        </a>
-        <span style={{ color: '#666', fontSize: '10px' }}>0V01</span>
+      {/* Left section: Logo and main buttons */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <a 
+            href="https://github.com/alextreseder/wedm.xyz" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            style={{
+              color: 'white',
+              textDecoration: 'underline',
+              fontSize: '12px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            WEDM.XYZ
+          </a>
+          <span style={{ color: '#666', fontSize: '10px' }}>0V01</span>
+        </div>
+
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button 
+            style={{
+              backgroundColor: '#333',
+              color: 'white',
+              border: '1px solid #555',
+              borderRadius: '3px',
+              padding: '2px 8px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+            onClick={handleImportClick}
+          >
+            Import Model
+          </button>
+          <button 
+            style={{
+              backgroundColor: '#333',
+              color: 'white',
+              border: '1px solid #555',
+              borderRadius: '3px',
+              padding: '2px 8px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+            onClick={handleClearScene}
+          >
+            Clear Scene
+          </button>
+        </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '10px' }}>
+      {/* Right section: Demo button */}
+      <div>
         <button 
           style={{
-            backgroundColor: '#333',
+            backgroundColor: '#2a4a2a',
             color: 'white',
-            border: '1px solid #555',
+            border: '1px solid #4a6a4a',
             borderRadius: '3px',
             padding: '2px 8px',
             cursor: 'pointer',
             fontSize: '12px'
           }}
-          onClick={handleImportClick}
+          onClick={handleLoadGearDemo}
         >
-          Import Model
-        </button>
-        <button 
-          style={{
-            backgroundColor: '#333',
-            color: 'white',
-            border: '1px solid #555',
-            borderRadius: '3px',
-            padding: '2px 8px',
-            cursor: 'pointer',
-            fontSize: '12px'
-          }}
-          onClick={handleClearScene}
-        >
-          Clear Scene
+          Gear Demo
         </button>
       </div>
     </div>
