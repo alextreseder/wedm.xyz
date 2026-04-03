@@ -70,6 +70,14 @@ interface ProjectStore extends ProjectState {
     /** Set the proximity threshold for edge/vertex detection */
     setProximityThreshold: (type: 'edge' | 'vertex', pixels: number) => void;
 
+    // --- Environment Actions ---
+    /** Set a single environment color */
+    setEnvironmentColor: (key: keyof ProjectState['environment']['colors'], value: string) => void;
+    /** Set a single tweakpane theme color */
+    setTweakpaneColor: (key: keyof ProjectState['environment']['tweakpane'], value: string) => void;
+    /** Set theme preset */
+    setThemePreset: (preset: string) => void;
+
     // --- Visibility Actions ---
     /** Set visibility of a specific element type */
     setVisibility: (type: 'faces' | 'edges' | 'vertices' | 'tessellation', visible: boolean) => void;
@@ -287,6 +295,31 @@ export const useStore = create<ProjectStore>()(subscribeWithSelector((set, get) 
             }
         };
     }),
+
+    // =========================================================================
+    // ENVIRONMENT ACTIONS
+    // =========================================================================
+
+    setEnvironmentColor: (key, value) => set((state) => ({
+        environment: {
+            ...state.environment,
+            colors: { ...state.environment.colors, [key]: value }
+        }
+    })),
+
+    setTweakpaneColor: (key, value) => set((state) => ({
+        environment: {
+            ...state.environment,
+            tweakpane: { ...state.environment.tweakpane, [key]: value }
+        }
+    })),
+
+    setThemePreset: (preset) => set((state) => ({
+        environment: {
+            ...state.environment,
+            themePreset: preset
+        }
+    })),
 
     // =========================================================================
     // VISIBILITY ACTIONS

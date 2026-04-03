@@ -6,6 +6,9 @@ import { OrientationGizmo } from '../utils/OrientationGizmo';
 import { useStore } from '../store/useStore';
 import type { MeshResult } from '../services/occtService';
 
+/** Strips alpha from 8-char hex (#rrggbbaa → #rrggbb) for Three.js compatibility */
+const hex6 = (color: string) => color.length === 9 ? color.slice(0, 7) : color;
+
 const SceneWindow: React.FC = () => {
   // Store refs for accessing current state in closures
   // (useEffect closures capture values at mount time, so we use refs)
@@ -47,11 +50,11 @@ const SceneWindow: React.FC = () => {
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Initialize Scene
+    // Initialize Scene (colors from store)
+    const envColors = useStore.getState().environment.colors;
     const scene = new THREE.Scene();
-    const backgroundColor = 0x16161D;
-    scene.background = new THREE.Color(backgroundColor);
-    scene.fog = new THREE.Fog(backgroundColor, 200, 600);
+    scene.background = new THREE.Color(hex6(envColors.sceneBackground));
+    scene.fog = new THREE.Fog(hex6(envColors.sceneFog), 200, 600);
     sceneRef.current = scene;
 
     // Initialize Camera (Z-up coordinate system)
@@ -100,11 +103,11 @@ const SceneWindow: React.FC = () => {
     }
 
     // Lights
-    const light = new THREE.HemisphereLight(0xffffff, 0x444444);
+    const light = new THREE.HemisphereLight(hex6(envColors.hemisphereSky), hex6(envColors.hemisphereGround));
     light.position.set(0, 200, 0);
     scene.add(light);
 
-    const light2 = new THREE.DirectionalLight(0xbbbbbb);
+    const light2 = new THREE.DirectionalLight(hex6(envColors.directionalLight));
     light2.position.set(6, 50, -12);
     light2.castShadow = true;
     light2.shadow.camera.top = 200;
@@ -121,7 +124,7 @@ const SceneWindow: React.FC = () => {
     const matcap = textureLoader.load('./textures/dullFrontLitMetal.png', () => markDirty());
 
     const matcapMaterial = new THREE.MeshMatcapMaterial({
-      color: new THREE.Color(0xf5f5f5),
+      color: new THREE.Color(hex6(envColors.modelMaterial)),
       matcap: matcap,
       polygonOffset: true,
       polygonOffsetFactor: 2.0,
@@ -133,7 +136,7 @@ const SceneWindow: React.FC = () => {
     const groundMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(2000, 2000),
       new THREE.MeshPhongMaterial({
-        color: 0x080808,
+        color: hex6(envColors.groundPlane),
         depthWrite: true,
         dithering: true,
         polygonOffset: true,
@@ -147,7 +150,7 @@ const SceneWindow: React.FC = () => {
     scene.add(groundMesh);
 
     // Create the Ground Grid (Z-up: grid on XY plane at Z=0)
-    const grid = new THREE.GridHelper(2000, 20, 0xcccccc, 0xcccccc);
+    const grid = new THREE.GridHelper(2000, 20, hex6(envColors.gridLines), hex6(envColors.gridLines));
     grid.rotation.x = Math.PI / 2;  // Rotate from XZ to XY plane
     grid.position.z = 0.01;  // Slightly above ground to prevent z-fighting
     grid.material.opacity = 0.3;
@@ -162,7 +165,7 @@ const SceneWindow: React.FC = () => {
     // Vertex highlight sphere (screen-space sized)
     const vertexSphereGeometry = new THREE.SphereGeometry(1, 16, 16);
     const vertexSphereMaterial = new THREE.MeshBasicMaterial({ 
-        color: 0xff0000,
+        color: hex6(envColors.vertexHighlight),
         depthTest: false,  // Always visible
         transparent: true,
         opacity: 0.9
@@ -441,32 +444,28 @@ const SceneWindow: React.FC = () => {
         }
     };
 
-    /**
-     * Applies highlight to a face by setting vertex colors to red.
-     */
     const applyFaceHighlight = (mesh: THREE.Mesh, faceId: number) => {
         const faceIdAttribute = mesh.geometry.getAttribute('faceId');
         const colors = mesh.geometry.getAttribute('color');
+        const hc = new THREE.Color(hex6(storeRef.current.environment.colors.faceHighlight));
         
         for (let i = 0; i < faceIdAttribute.count; i++) {
             if (faceIdAttribute.getX(i) === faceId) {
-                colors.setXYZ(i, 1, 0, 0);
+                colors.setXYZ(i, hc.r, hc.g, hc.b);
             }
         }
         colors.needsUpdate = true;
         highlightedFaceRef.current = { object: mesh, index: faceId };
     };
 
-    /**
-     * Applies highlight to an edge by setting vertex colors to red.
-     */
     const applyEdgeHighlight = (lines: THREE.LineSegments, edgeId: number) => {
         const edgeIdAttribute = lines.geometry.getAttribute('edgeId');
         const colors = lines.geometry.getAttribute('color');
+        const hc = new THREE.Color(hex6(storeRef.current.environment.colors.edgeHighlight));
         
         for (let i = 0; i < edgeIdAttribute.count; i++) {
             if (edgeIdAttribute.getX(i) === edgeId) {
-                colors.setXYZ(i, 1, 0, 0);
+                colors.setXYZ(i, hc.r, hc.g, hc.b);
             }
         }
         colors.needsUpdate = true;
@@ -716,7 +715,7 @@ const SceneWindow: React.FC = () => {
           edgeGeo.setAttribute('color', new THREE.BufferAttribute(edgeColors, 3));
 
           const lineMat = new THREE.LineBasicMaterial({ 
-              color: 0xffffff,
+              color: hex6(storeRef.current.environment.colors.modelEdges),
               vertexColors: true,
               // Use polygonOffset to render edges slightly in front of faces
               polygonOffset: true,
@@ -737,7 +736,7 @@ const SceneWindow: React.FC = () => {
           vertexGeo.setAttribute('position', new THREE.BufferAttribute(meshData.vertices.positions, 3));
           
           const vertexMat = new THREE.PointsMaterial({
-              color: 0x00ffff,
+              color: hex6(storeRef.current.environment.colors.modelVertices),
               size: 3,
               sizeAttenuation: false,  // Constant screen size
               depthTest: false
@@ -775,7 +774,7 @@ const SceneWindow: React.FC = () => {
           tessGeo.setAttribute('position', new THREE.Float32BufferAttribute(tessLines, 3));
           
           const tessMat = new THREE.LineBasicMaterial({
-              color: 0x444444,  // Medium-dark grey
+              color: hex6(storeRef.current.environment.colors.tessellationLines),
               transparent: true,
               opacity: 0.5
           });
@@ -850,6 +849,46 @@ const SceneWindow: React.FC = () => {
       markDirty();
     });
 
+    // Subscribe to environment color changes for live updates
+    const unsubscribeColors = useStore.subscribe(
+      (state) => state.environment.colors,
+      (colors) => {
+        scene.background = new THREE.Color(hex6(colors.sceneBackground));
+        if (scene.fog instanceof THREE.Fog) {
+          scene.fog.color.set(hex6(colors.sceneFog));
+        }
+
+        light.color.set(hex6(colors.hemisphereSky));
+        light.groundColor.set(hex6(colors.hemisphereGround));
+        light2.color.set(hex6(colors.directionalLight));
+
+        matcapMaterial.color.set(hex6(colors.modelMaterial));
+
+        (groundMesh.material as THREE.MeshPhongMaterial).color.set(hex6(colors.groundPlane));
+
+        if (Array.isArray(grid.material)) {
+          grid.material.forEach(m => (m as THREE.LineBasicMaterial).color.set(hex6(colors.gridLines)));
+        } else {
+          (grid.material as THREE.LineBasicMaterial).color.set(hex6(colors.gridLines));
+        }
+
+        vertexSphereMaterial.color.set(hex6(colors.vertexHighlight));
+
+        mainObject.traverse((child) => {
+          if (child.name === 'brepEdges' && child instanceof THREE.LineSegments) {
+            (child.material as THREE.LineBasicMaterial).color.set(hex6(colors.modelEdges));
+          } else if (child.name === 'brepVertices' && child instanceof THREE.Points) {
+            (child.material as THREE.PointsMaterial).color.set(hex6(colors.modelVertices));
+          } else if (child.name === 'tessellation' && child instanceof THREE.LineSegments) {
+            (child.material as THREE.LineBasicMaterial).color.set(hex6(colors.tessellationLines));
+          }
+        });
+
+        markDirty();
+      },
+      { equalityFn: (a, b) => JSON.stringify(a) === JSON.stringify(b) }
+    );
+
     // Subscribe to visibility changes
     const unsubscribeVisibility = useStore.subscribe(
       (state) => state.mesh.visibility,
@@ -900,6 +939,7 @@ const SceneWindow: React.FC = () => {
 
     return () => {
       unsubscribe();
+      unsubscribeColors();
       unsubscribeVisibility();
       containerRef.current?.removeEventListener('mousemove', onMouseMove);
       containerRef.current?.removeEventListener('click', onClick);

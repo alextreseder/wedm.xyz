@@ -66,3 +66,27 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+/* Golden Layout theme overrides via CSS custom properties */
+.lm_goldenlayout {
+  background: var(--gl-background, #000000) !important;
+}
+.lm_content {
+  background: var(--gl-content-background, #222222) !important;
+}
+.lm_header .lm_tab {
+  color: var(--gl-tab-text, #999999) !important;
+  background: var(--gl-tab-background, #111111) !important;
+}
+.lm_tab:hover,
+.lm_tab.lm_active {
+  background: var(--gl-content-background, #222222) !important;
+  color: var(--gl-tab-active-text, #dddddd) !important;
+}
+.lm_tab.lm_active.lm_focused {
+  background-color: var(--gl-tab-focus-accent, #354be3) !important;
+}
+.lm_splitter:hover,
+.lm_splitter.lm_dragging {
+  background: var(--gl-splitter-hover, #444444) !important;
+}

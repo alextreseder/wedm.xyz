@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { subscribeToConsole, initConsoleCapture } from '../utils/consoleCapture';
 import type { LogMessage } from '../utils/consoleCapture';
+import { useStore } from '../store/useStore';
 
 // Initialize capture globally
 initConsoleCapture();
@@ -8,9 +9,9 @@ initConsoleCapture();
 const ConsoleWindow: React.FC = () => {
   const [logs, setLogs] = useState<LogMessage[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const colors = useStore((state) => state.environment.colors);
 
   useEffect(() => {
-    // Welcome message
     const welcomeId = Math.random().toString(36).substr(2, 9);
     setLogs(prev => [
       ...prev,
@@ -22,7 +23,6 @@ const ConsoleWindow: React.FC = () => {
       }
     ]);
 
-    // Subscribe to new logs
     const unsubscribe = subscribeToConsole((newLog) => {
       setLogs(prev => [...prev, newLog]);
     });
@@ -30,15 +30,14 @@ const ConsoleWindow: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // Auto-scroll to bottom
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
   const getColor = (level: string) => {
     switch (level) {
-      case 'error': return '#ff5555'; // Red
-      case 'warn': return '#ffb86c';  // Orange
-      default: return '#f8f8f2';      // White
+      case 'error': return colors.consoleError;
+      case 'warn': return colors.consoleWarning;
+      default: return colors.consoleText;
     }
   };
 
@@ -46,8 +45,8 @@ const ConsoleWindow: React.FC = () => {
     <div style={{
       width: '100%',
       height: '100%',
-      backgroundColor: 'hsl(240, 14%, 10%)', // Eigengrau
-      color: '#f8f8f2',
+      backgroundColor: colors.consoleBackground,
+      color: colors.consoleText,
       fontFamily: 'monospace',
       padding: '10px',
       boxSizing: 'border-box',

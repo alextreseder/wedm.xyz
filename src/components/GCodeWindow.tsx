@@ -5,28 +5,29 @@ import ErrorBoundary from './ErrorBoundary';
 // Lazy load the Monaco Editor to prevent bundle initialization issues
 const Editor = lazy(() => import('@monaco-editor/react'));
 
+const hex6 = (color: string) => color.length === 9 ? color.slice(0, 7) : color;
+
 const GCodeEditorContent: React.FC = () => {
-  // Select gcode text from store
   const gcodeText = useStore((state) => state.gcode.text);
   const setGCodeText = useStore((state) => state.setGCodeText);
+  const gcodeBg = useStore((state) => state.environment.colors.gcodeBackground);
 
-  // Handle editor changes
   const handleEditorChange = (value: string | undefined) => {
     if (value !== undefined) {
       setGCodeText(value);
     }
   };
 
-  // Define custom theme to match Config window (Iceberg theme base)
   const handleBeforeMount = (monaco: any) => {
+    const bg = hex6(gcodeBg);
     monaco.editor.defineTheme('wedm-dark', {
       base: 'vs-dark',
       inherit: true,
       rules: [],
       colors: {
-        'editor.background': '#161722', // Matches hsla(230, 20%, 11%, 1.00)
+        'editor.background': bg,
         'editor.lineHighlightBackground': '#1f2130',
-        'editorGutter.background': '#161722',
+        'editorGutter.background': bg,
       }
     });
   };

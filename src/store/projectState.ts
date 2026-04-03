@@ -167,6 +167,77 @@ export interface ProjectState {
     };
 
     /**
+     * ENVIRONMENT: Global UI and rendering settings.
+     * Colors, lighting, and visual theming that span the entire application.
+     */
+    environment: {
+        themePreset: string;             // Active theme preset name
+        colors: {
+            sceneBackground: string;     // 3D viewport background
+            sceneFog: string;            // Distance fog color
+            groundPlane: string;         // Ground mesh color
+            gridLines: string;           // Ground grid color
+            modelMaterial: string;       // Matcap material tint
+            modelEdges: string;          // BRep edge wireframe
+            modelVertices: string;       // BRep vertex markers
+            tessellationLines: string;   // Mesh triangulation overlay
+            faceHighlight: string;       // Hovered face color
+            edgeHighlight: string;       // Hovered edge color
+            vertexHighlight: string;     // Hovered vertex sphere
+            hemisphereSky: string;       // Hemisphere light (sky)
+            hemisphereGround: string;    // Hemisphere light (ground)
+            directionalLight: string;    // Key light color
+            gizmoX: string;             // Orientation gizmo X axis
+            gizmoY: string;             // Orientation gizmo Y axis
+            gizmoZ: string;             // Orientation gizmo Z axis
+            consoleBackground: string;   // Console panel background
+            consoleText: string;         // Console default text
+            consoleError: string;        // Console error text
+            consoleWarning: string;      // Console warning text
+            gcodeBackground: string;     // G-Code editor background
+            gcodeComment: string;        // G-Code comment syntax color
+            gcodeG: string;              // G-Code G command color
+            gcodeM: string;              // G-Code M command color
+            gcodeParameter: string;      // G-Code parameter color
+            topBarBackground: string;    // Top bar background
+            topBarBorder: string;        // Top bar bottom border
+            topBarButtonBg: string;      // Top bar button background
+            topBarButtonBorder: string;  // Top bar button border
+            topBarText: string;          // Top bar text color
+            glBackground: string;        // Golden Layout container & splitters
+            glContentBackground: string; // GL pane content area
+            glTabBackground: string;     // GL inactive tab
+            glTabText: string;           // GL inactive tab text
+            glTabActiveText: string;     // GL active/hover tab text
+            glTabFocusAccent: string;    // GL focused tab accent
+            glSplitterHover: string;     // GL splitter on hover
+        };
+        tweakpane: {
+            baseBackground: string;
+            baseShadow: string;
+            buttonBackground: string;
+            buttonBackgroundActive: string;
+            buttonBackgroundFocus: string;
+            buttonBackgroundHover: string;
+            buttonForeground: string;
+            containerBackground: string;
+            containerBackgroundActive: string;
+            containerBackgroundFocus: string;
+            containerBackgroundHover: string;
+            containerForeground: string;
+            grooveForeground: string;
+            inputBackground: string;
+            inputBackgroundActive: string;
+            inputBackgroundFocus: string;
+            inputBackgroundHover: string;
+            inputForeground: string;
+            labelForeground: string;
+            monitorBackground: string;
+            monitorForeground: string;
+        };
+    };
+
+    /**
      * GCODE: Final Machine Instructions.
      * The text that will be saved to the .NC or .GCODE file.
      */
@@ -274,6 +345,72 @@ export const initialProjectState: ProjectState = {
             totalLength: 0,
             estimatedTime: 0,
             segments: []
+        }
+    },
+    environment: {
+        themePreset: 'a',
+        colors: {
+            sceneBackground: '#16161dff',
+            sceneFog: '#16161dff',
+            groundPlane: '#080808ff',
+            gridLines: '#ccccccff',
+            modelMaterial: '#f5f5f5ff',
+            modelEdges: '#ffffffff',
+            modelVertices: '#00ffffff',
+            tessellationLines: '#444444ff',
+            faceHighlight: '#ff0000ff',
+            edgeHighlight: '#ff0000ff',
+            vertexHighlight: '#ff0000ff',
+            hemisphereSky: '#ffffffff',
+            hemisphereGround: '#444444ff',
+            directionalLight: '#bbbbbbff',
+            gizmoX: '#f73c3cff',
+            gizmoY: '#6ccb26ff',
+            gizmoZ: '#178cf0ff',
+            consoleBackground: '#16161aff',
+            consoleText: '#f8f8f2ff',
+            consoleError: '#ff5555ff',
+            consoleWarning: '#ffb86cff',
+            gcodeBackground: '#161722ff',
+            gcodeComment: '#6c7089ff',
+            gcodeG: '#6ccb26ff',
+            gcodeM: '#f73c3cff',
+            gcodeParameter: '#178cf0ff',
+            topBarBackground: '#000000ff',
+            topBarBorder: '#333333ff',
+            topBarButtonBg: '#333333ff',
+            topBarButtonBorder: '#555555ff',
+            topBarText: '#ffffffff',
+            glBackground: '#000000ff',
+            glContentBackground: '#222222ff',
+            glTabBackground: '#111111ff',
+            glTabText: '#999999ff',
+            glTabActiveText: '#ddddddff',
+            glTabFocusAccent: '#354be3ff',
+            glSplitterHover: '#444444ff',
+        },
+        tweakpane: {
+            baseBackground: '#16171fff',
+            baseShadow: '#00000033',
+            buttonBackground: '#c5c6cdff',
+            buttonBackgroundActive: '#f0f1f4ff',
+            buttonBackgroundFocus: '#e2e3e8ff',
+            buttonBackgroundHover: '#d3d5dbff',
+            buttonForeground: '#16171fff',
+            containerBackground: '#1f2336ff',
+            containerBackgroundActive: '#3c4264ff',
+            containerBackgroundFocus: '#32374fff',
+            containerBackgroundHover: '#282d44ff',
+            containerForeground: '#c5c6cdff',
+            grooveForeground: '#101218ff',
+            inputBackground: '#101218ff',
+            inputBackgroundActive: '#2a3050ff',
+            inputBackgroundFocus: '#21263eff',
+            inputBackgroundHover: '#1b1d28ff',
+            inputForeground: '#c5c6cdff',
+            labelForeground: '#6c7089ff',
+            monitorBackground: '#101218ff',
+            monitorForeground: '#6c7089ff',
         }
     },
     gcode: {

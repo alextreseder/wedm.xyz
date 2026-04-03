@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoldenLayout, LayoutConfig, ComponentContainer } from 'golden-layout';
-import type { RowOrColumnItemConfig, ComponentItemConfig, JsonValue, StackItemConfig } from 'golden-layout';
+import type { ComponentItemConfig, JsonValue, StackItemConfig } from 'golden-layout';
 import 'golden-layout/dist/css/goldenlayout-base.css';
 import 'golden-layout/dist/css/themes/goldenlayout-dark-theme.css';
 
@@ -10,6 +10,7 @@ import ConsoleWindow from './ConsoleWindow';
 import SceneWindow from './SceneWindow';
 import ConfigWindow from './ConfigWindow';
 import GCodeWindow from './GCodeWindow';
+import EnvironmentWindow from './EnvironmentWindow';
 
 /**
  * Interface representing the state for the standard window component.
@@ -97,16 +98,24 @@ const MainLayout: React.FC = () => {
       container.on('destroy', () => { root.unmount(); });
     });
 
+    layout.registerComponentFactoryFunction('simulation-window', (container: ComponentContainer, state: JsonValue | undefined) => {
+      const componentState = state as unknown as WindowState;
+      const root = createRoot(container.element);
+      root.render(<StandardWindow label={componentState?.label} />);
+      container.on('destroy', () => { root.unmount(); });
+    });
+
+    layout.registerComponentFactoryFunction('environment-window', (container: ComponentContainer) => {
+      const root = createRoot(container.element);
+      root.render(<EnvironmentWindow />);
+      container.on('destroy', () => { root.unmount(); });
+    });
+
     /**
      * Define the layout configuration.
      * 
-     * Left Column (A): 20% width
-     *   - Stack:
-     *     - Config (Tweakpane)
-     *     - G-Code
-     * Right Column:
-     *   - Scene (B): Top 2/3
-     *   - Console (C): Bottom 1/3
+     * Left Stack (15%): Config, G-Code, Console, Simulation, Environment
+     * Right: Scene (full)
      */
     const config: LayoutConfig = {
       root: {
@@ -127,26 +136,32 @@ const MainLayout: React.FC = () => {
                     componentType: 'gcode-window',
                     title: 'G-Code',
                     componentState: { label: 'G-Code' }
+                } as ComponentItemConfig,
+                {
+                    type: 'component',
+                    componentType: 'console-window',
+                    title: 'Console',
+                    componentState: { label: 'Console' }
+                } as ComponentItemConfig,
+                {
+                    type: 'component',
+                    componentType: 'simulation-window',
+                    title: 'Simulation',
+                    componentState: { label: 'Simulation' }
+                } as ComponentItemConfig,
+                {
+                    type: 'component',
+                    componentType: 'environment-window',
+                    title: 'Environment',
+                    componentState: { label: 'Environment' }
                 } as ComponentItemConfig
             ]
           } as StackItemConfig,
           {
-            type: 'column',
-            content: [
-              {
-                type: 'component',
-                componentType: 'scene-window',
-                title: 'Scene',
-                height: 75
-              } as ComponentItemConfig,
-              {
-                type: 'component',
-                componentType: 'console-window',
-                title: 'Console',
-                height: 25
-              } as ComponentItemConfig
-            ]
-          } as RowOrColumnItemConfig
+            type: 'component',
+            componentType: 'scene-window',
+            title: 'Scene',
+          } as ComponentItemConfig
         ]
       }
     };

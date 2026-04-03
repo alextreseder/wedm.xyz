@@ -10,6 +10,7 @@ import { useStore } from '../store/useStore';
  */
 const TopBar: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const colors = useStore((state) => state.environment.colors);
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
@@ -68,12 +69,22 @@ const TopBar: React.FC = () => {
     }
   };
 
+  const btnStyle: React.CSSProperties = {
+    backgroundColor: colors.topBarButtonBg,
+    color: colors.topBarText,
+    border: `1px solid ${colors.topBarButtonBorder}`,
+    borderRadius: '3px',
+    padding: '2px 8px',
+    cursor: 'pointer',
+    fontSize: '12px'
+  };
+
   return (
     <div style={{
       width: '100%',
       height: '30px',
-      backgroundColor: 'black',
-      borderBottom: '1px solid #333',
+      backgroundColor: colors.topBarBackground,
+      borderBottom: `1px solid ${colors.topBarBorder}`,
       flexShrink: 0,
       display: 'flex',
       alignItems: 'center',
@@ -97,7 +108,7 @@ const TopBar: React.FC = () => {
             target="_blank" 
             rel="noopener noreferrer"
             style={{
-              color: 'white',
+              color: colors.topBarText,
               textDecoration: 'underline',
               fontSize: '12px',
               fontWeight: 'bold',
@@ -110,51 +121,21 @@ const TopBar: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', gap: '10px' }}>
-          <button 
-            style={{
-              backgroundColor: '#333',
-              color: 'white',
-              border: '1px solid #555',
-              borderRadius: '3px',
-              padding: '2px 8px',
-              cursor: 'pointer',
-              fontSize: '12px'
-            }}
-            onClick={handleImportClick}
-          >
+          <button style={btnStyle} onClick={handleImportClick}>
             Import Model
           </button>
-          <button 
-            style={{
-              backgroundColor: '#333',
-              color: 'white',
-              border: '1px solid #555',
-              borderRadius: '3px',
-              padding: '2px 8px',
-              cursor: 'pointer',
-              fontSize: '12px'
-            }}
-            onClick={handleClearScene}
-          >
+          <button style={btnStyle} onClick={handleClearScene}>
             Clear Scene
+          </button>
+          <button style={btnStyle} onClick={() => console.log('Tabs')}>
+            Tabs
           </button>
         </div>
       </div>
 
       {/* Right section: Demo button */}
       <div style={{ display: 'flex', alignItems: 'center' }}>
-        <button 
-          style={{
-            backgroundColor: '#333',
-            color: 'white',
-            border: '1px solid #555',
-            borderRadius: '3px',
-            padding: '2px 8px',
-            cursor: 'pointer',
-            fontSize: '12px'
-          }}
-          onClick={handleLoadGearDemo}
-        >
+        <button style={btnStyle} onClick={handleLoadGearDemo}>
           Gear Demo
         </button>
       </div>

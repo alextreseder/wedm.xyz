@@ -150,19 +150,7 @@ const ConfigWindow: React.FC = () => {
 
     camPage.addBlade({ view: 'separator' });
 
-    camPage.addButton({ title: 'Solve CAM' }).on('click', () => console.log('Solve CAM'));
-
-    // Functions Folder
-    const functionsFolder = camPage.addFolder({ title: 'Functions', expanded: false });
-    functionsFolder.addButton({ title: 'Auto Orient' }).on('click', () => console.log('Auto Orient'));
-    functionsFolder.addButton({ title: 'Detect Wall Shell' }).on('click', () => console.log('Detect Wall Shell'));
-    functionsFolder.addButton({ title: 'Generate Offset Shell' }).on('click', () => console.log('Generate Offset Shell'));
-    functionsFolder.addButton({ title: 'Extend to Guide Planes' }).on('click', () => console.log('Extend to Guide Planes'));
-    functionsFolder.addButton({ title: 'Intersect' }).on('click', () => console.log('Intersect'));
-    functionsFolder.addButton({ title: 'Rasterize' }).on('click', () => console.log('Rasterize'));
-    functionsFolder.addButton({ title: 'Linking' }).on('click', () => console.log('Linking'));
-    functionsFolder.addButton({ title: 'Post' }).on('click', () => console.log('Post'));
-
+    camPage.addButton({ title: 'Generate Cage' }).on('click', () => console.log('Generate Cage'));
 
     // --- Spark Tab ---
     const sparkPage = tab.pages[1];
