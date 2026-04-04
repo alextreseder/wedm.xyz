@@ -394,7 +394,7 @@ const ConfigWindow: React.FC = () => {
       style={{ 
         width: '100%', 
         height: '100%', 
-        backgroundColor: 'hsl(240, 14%, 10%)',
+        backgroundColor: 'var(--gl-window-bg, #16161d)',
         overflowY: 'auto'
       }} 
     />

@@ -90,3 +90,6 @@ body {
 .lm_splitter.lm_dragging {
   background: var(--gl-splitter-hover, #444444) !important;
 }
+:root {
+  --gl-window-bg: #16161d;
+}

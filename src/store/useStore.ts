@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { initialProjectState } from './projectState';
 import type { ProjectState } from './projectState';
+import { deriveColors, deriveTweakpane } from '../utils/deriveTheme';
+import type { PaletteKey } from '../utils/deriveTheme';
 
 /**
  * Hovered Entity Type
@@ -71,12 +73,20 @@ interface ProjectStore extends ProjectState {
     setProximityThreshold: (type: 'edge' | 'vertex', pixels: number) => void;
 
     // --- Environment Actions ---
-    /** Set a single environment color */
+    /** Set a single palette color and re-derive all downstream colors */
+    setPaletteColor: (key: PaletteKey, value: string) => void;
+    /** Apply a full palette and re-derive */
+    applyPalette: (palette: ProjectState['environment']['palette']) => void;
+    /** Set a single environment color (advanced override, no re-derive) */
     setEnvironmentColor: (key: keyof ProjectState['environment']['colors'], value: string) => void;
-    /** Set a single tweakpane theme color */
+    /** Set a single tweakpane theme color (advanced override) */
     setTweakpaneColor: (key: keyof ProjectState['environment']['tweakpane'], value: string) => void;
-    /** Set theme preset */
+    /** Set theme preset name */
     setThemePreset: (preset: string) => void;
+    /** Set theme mode (Dark / Light) */
+    setThemeMode: (mode: string) => void;
+    /** Apply a full theme (colors + tweakpane) at once */
+    applyTheme: (colors: ProjectState['environment']['colors'], tweakpane: ProjectState['environment']['tweakpane']) => void;
 
     // --- Visibility Actions ---
     /** Set visibility of a specific element type */
@@ -300,6 +310,28 @@ export const useStore = create<ProjectStore>()(subscribeWithSelector((set, get) 
     // ENVIRONMENT ACTIONS
     // =========================================================================
 
+    setPaletteColor: (key, value) => set((state) => {
+        const newPalette = { ...state.environment.palette, [key]: value };
+        const mode = state.environment.themeMode;
+        return {
+            environment: {
+                ...state.environment,
+                palette: newPalette,
+                colors: deriveColors(newPalette, mode),
+                tweakpane: deriveTweakpane(newPalette, mode),
+            }
+        };
+    }),
+
+    applyPalette: (palette) => set((state) => ({
+        environment: {
+            ...state.environment,
+            palette,
+            colors: deriveColors(palette, state.environment.themeMode),
+            tweakpane: deriveTweakpane(palette, state.environment.themeMode),
+        }
+    })),
+
     setEnvironmentColor: (key, value) => set((state) => ({
         environment: {
             ...state.environment,
@@ -318,6 +350,23 @@ export const useStore = create<ProjectStore>()(subscribeWithSelector((set, get) 
         environment: {
             ...state.environment,
             themePreset: preset
+        }
+    })),
+
+    setThemeMode: (mode) => set((state) => ({
+        environment: {
+            ...state.environment,
+            themeMode: mode,
+            colors: deriveColors(state.environment.palette, mode),
+            tweakpane: deriveTweakpane(state.environment.palette, mode),
+        }
+    })),
+
+    applyTheme: (colors, tweakpane) => set((state) => ({
+        environment: {
+            ...state.environment,
+            colors,
+            tweakpane,
         }
     })),
 

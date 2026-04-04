@@ -171,7 +171,26 @@ export interface ProjectState {
      * Colors, lighting, and visual theming that span the entire application.
      */
     environment: {
-        themePreset: string;             // Active theme preset name
+        themePreset: string;             // Active palette preset name (e.g. "Iceberg")
+        themeMode: string;               // "Dark" or "Light"
+        palette: {
+            dark1: string;               // Structural chrome
+            dark2: string;               // Main surface background
+            content1: string;            // Recessed elements (inputs, grooves)
+            content2: string;            // Elevated surface (containers)
+            content3: string;            // Chrome detail (borders, buttons)
+            content4: string;            // Muted text (labels, comments)
+            light1: string;              // Secondary foreground
+            light2: string;              // Primary foreground
+            accentRed: string;           // Gizmo X, G-code G, error
+            accentGreen: string;         // Gizmo Y, G-code M
+            accentBlue: string;          // Gizmo Z, G-code parameter
+            accentCyan: string;          // Model vertices
+            accentOrange: string;        // Warnings
+            accentIndigo: string;        // Focus / primary accent
+            accentSurface: string;       // 3D model material
+            accentHighlight: string;     // Scene hover highlight
+        };
         colors: {
             sceneBackground: string;     // 3D viewport background
             sceneFog: string;            // Distance fog color
@@ -199,6 +218,7 @@ export interface ProjectState {
             gcodeG: string;              // G-Code G command color
             gcodeM: string;              // G-Code M command color
             gcodeParameter: string;      // G-Code parameter color
+            gcodeLineHighlight: string;  // G-Code active line highlight
             topBarBackground: string;    // Top bar background
             topBarBorder: string;        // Top bar bottom border
             topBarButtonBg: string;      // Top bar button background
@@ -211,6 +231,9 @@ export interface ProjectState {
             glTabActiveText: string;     // GL active/hover tab text
             glTabFocusAccent: string;    // GL focused tab accent
             glSplitterHover: string;     // GL splitter on hover
+            glWindowBg: string;          // GL window pane background (behind tweakpane etc.)
+            simBackground: string;       // Simulation window background
+            simText: string;             // Simulation window text
         };
         tweakpane: {
             baseBackground: string;
@@ -348,7 +371,26 @@ export const initialProjectState: ProjectState = {
         }
     },
     environment: {
-        themePreset: 'a',
+        themePreset: 'Iceberg',
+        themeMode: 'Dark',
+        palette: {
+            dark1: '#000000ff',
+            dark2: '#16161dff',
+            content1: '#101218ff',
+            content2: '#1f2130ff',
+            content3: '#333333ff',
+            content4: '#6c7089ff',
+            light1: '#c5c6cdff',
+            light2: '#ffffffff',
+            accentRed: '#f73c3cff',
+            accentGreen: '#6ccb26ff',
+            accentBlue: '#178cf0ff',
+            accentCyan: '#00ffffff',
+            accentOrange: '#ffb86cff',
+            accentIndigo: '#354be3ff',
+            accentSurface: '#f5f5f5ff',
+            accentHighlight: '#ff0000ff',
+        },
         colors: {
             sceneBackground: '#16161dff',
             sceneFog: '#16161dff',
@@ -372,10 +414,11 @@ export const initialProjectState: ProjectState = {
             consoleError: '#ff5555ff',
             consoleWarning: '#ffb86cff',
             gcodeBackground: '#161722ff',
-            gcodeComment: '#6c7089ff',
-            gcodeG: '#6ccb26ff',
-            gcodeM: '#f73c3cff',
+            gcodeComment: '#c5c6cdff',
+            gcodeG: '#f73c3cff',
+            gcodeM: '#6ccb26ff',
             gcodeParameter: '#178cf0ff',
+            gcodeLineHighlight: '#1f2130ff',
             topBarBackground: '#000000ff',
             topBarBorder: '#333333ff',
             topBarButtonBg: '#333333ff',
@@ -388,6 +431,9 @@ export const initialProjectState: ProjectState = {
             glTabActiveText: '#ddddddff',
             glTabFocusAccent: '#354be3ff',
             glSplitterHover: '#444444ff',
+            glWindowBg: '#16161dff',
+            simBackground: '#16171fff',
+            simText: '#f8f8f2ff',
         },
         tweakpane: {
             baseBackground: '#16171fff',
