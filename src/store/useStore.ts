@@ -77,16 +77,16 @@ interface ProjectStore extends ProjectState {
     setPaletteColor: (key: PaletteKey, value: string) => void;
     /** Apply a full palette and re-derive */
     applyPalette: (palette: ProjectState['environment']['palette']) => void;
-    /** Set a single environment color (advanced override, no re-derive) */
-    setEnvironmentColor: (key: keyof ProjectState['environment']['colors'], value: string) => void;
-    /** Set a single tweakpane theme color (advanced override) */
-    setTweakpaneColor: (key: keyof ProjectState['environment']['tweakpane'], value: string) => void;
     /** Set theme preset name */
     setThemePreset: (preset: string) => void;
     /** Set theme mode (Dark / Light) */
     setThemeMode: (mode: string) => void;
-    /** Apply a full theme (colors + tweakpane) at once */
-    applyTheme: (colors: ProjectState['environment']['colors'], tweakpane: ProjectState['environment']['tweakpane']) => void;
+    /** Set face highlight contrast (0-1) and re-derive colors */
+    setFaceHighlightContrast: (value: number) => void;
+
+    // --- Layout Actions ---
+    /** Store a serialized golden-layout config */
+    setLayoutConfig: (config: Record<string, any>) => void;
 
     // --- Visibility Actions ---
     /** Set visibility of a specific element type */
@@ -312,13 +312,13 @@ export const useStore = create<ProjectStore>()(subscribeWithSelector((set, get) 
 
     setPaletteColor: (key, value) => set((state) => {
         const newPalette = { ...state.environment.palette, [key]: value };
-        const mode = state.environment.themeMode;
+        const { themeMode, faceHighlightContrast } = state.environment;
         return {
             environment: {
                 ...state.environment,
                 palette: newPalette,
-                colors: deriveColors(newPalette, mode),
-                tweakpane: deriveTweakpane(newPalette, mode),
+                colors: deriveColors(newPalette, themeMode, faceHighlightContrast),
+                tweakpane: deriveTweakpane(newPalette, themeMode),
             }
         };
     }),
@@ -327,22 +327,8 @@ export const useStore = create<ProjectStore>()(subscribeWithSelector((set, get) 
         environment: {
             ...state.environment,
             palette,
-            colors: deriveColors(palette, state.environment.themeMode),
+            colors: deriveColors(palette, state.environment.themeMode, state.environment.faceHighlightContrast),
             tweakpane: deriveTweakpane(palette, state.environment.themeMode),
-        }
-    })),
-
-    setEnvironmentColor: (key, value) => set((state) => ({
-        environment: {
-            ...state.environment,
-            colors: { ...state.environment.colors, [key]: value }
-        }
-    })),
-
-    setTweakpaneColor: (key, value) => set((state) => ({
-        environment: {
-            ...state.environment,
-            tweakpane: { ...state.environment.tweakpane, [key]: value }
         }
     })),
 
@@ -357,18 +343,24 @@ export const useStore = create<ProjectStore>()(subscribeWithSelector((set, get) 
         environment: {
             ...state.environment,
             themeMode: mode,
-            colors: deriveColors(state.environment.palette, mode),
+            colors: deriveColors(state.environment.palette, mode, state.environment.faceHighlightContrast),
             tweakpane: deriveTweakpane(state.environment.palette, mode),
         }
     })),
 
-    applyTheme: (colors, tweakpane) => set((state) => ({
+    setFaceHighlightContrast: (value) => set((state) => ({
         environment: {
             ...state.environment,
-            colors,
-            tweakpane,
+            faceHighlightContrast: value,
+            colors: deriveColors(state.environment.palette, state.environment.themeMode, value),
         }
     })),
+
+    // =========================================================================
+    // LAYOUT ACTIONS
+    // =========================================================================
+
+    setLayoutConfig: (config) => set({ layout: config }),
 
     // =========================================================================
     // VISIBILITY ACTIONS

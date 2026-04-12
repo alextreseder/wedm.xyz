@@ -139,6 +139,14 @@ export class OrientationGizmo {
     );
   }
 
+  public setColors(x: [string, string], y: [string, string], z: [string, string]) {
+    this.options.colors = { x, y, z };
+    for (const bubble of this.bubbles) {
+      const base = bubble.axis.replace('-', '') as 'x' | 'y' | 'z';
+      bubble.color = this.options.colors[base];
+    }
+  }
+
   public update() {
     this.clear();
 

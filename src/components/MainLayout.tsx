@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoldenLayout, LayoutConfig, ComponentContainer } from 'golden-layout';
-import type { ComponentItemConfig, JsonValue, StackItemConfig } from 'golden-layout';
+import type { JsonValue } from 'golden-layout';
 import 'golden-layout/dist/css/goldenlayout-base.css';
 import 'golden-layout/dist/css/themes/goldenlayout-dark-theme.css';
 
@@ -11,6 +11,8 @@ import SceneWindow from './SceneWindow';
 import ConfigWindow from './ConfigWindow';
 import GCodeWindow from './GCodeWindow';
 import EnvironmentWindow from './EnvironmentWindow';
+import { useStore } from '../store/useStore';
+import { initialProjectState } from '../store/projectState';
 
 /**
  * Interface representing the state for the standard window component.
@@ -111,63 +113,29 @@ const MainLayout: React.FC = () => {
       container.on('destroy', () => { root.unmount(); });
     });
 
-    /**
-     * Define the layout configuration.
-     * 
-     * Left Stack (15%): Config, G-Code, Console, Simulation, Environment
-     * Right: Scene (full)
-     */
-    const config: LayoutConfig = {
-      root: {
-        type: 'row',
-        content: [
-          {
-            type: 'stack',
-            width: 15,
-            content: [
-                {
-                    type: 'component',
-                    componentType: 'config-window',
-                    title: 'Config',
-                    componentState: { label: 'Config' }
-                } as ComponentItemConfig,
-                {
-                    type: 'component',
-                    componentType: 'gcode-window',
-                    title: 'G-Code',
-                    componentState: { label: 'G-Code' }
-                } as ComponentItemConfig,
-                {
-                    type: 'component',
-                    componentType: 'console-window',
-                    title: 'Console',
-                    componentState: { label: 'Console' }
-                } as ComponentItemConfig,
-                {
-                    type: 'component',
-                    componentType: 'simulation-window',
-                    title: 'Simulation',
-                    componentState: { label: 'Simulation' }
-                } as ComponentItemConfig,
-                {
-                    type: 'component',
-                    componentType: 'environment-window',
-                    title: 'Environment',
-                    componentState: { label: 'Environment' }
-                } as ComponentItemConfig
-            ]
-          } as StackItemConfig,
-          {
-            type: 'component',
-            componentType: 'scene-window',
-            title: 'Scene',
-          } as ComponentItemConfig
-        ]
-      }
-    };
+    const savedLayout = useStore.getState().layout;
+    try {
+      layout.loadLayout(savedLayout as LayoutConfig);
+    } catch (e) {
+      console.warn('Failed to restore saved layout:', e);
+      layout.loadLayout(initialProjectState.layout as LayoutConfig);
+    }
 
-    // Load the layout configuration
-    layout.loadLayout(config);
+    let saveTimer: ReturnType<typeof setTimeout>;
+    layout.on('stateChanged', () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        if (layoutRef.current) {
+          try {
+            const resolved = layoutRef.current.saveLayout();
+            const config = LayoutConfig.fromResolved(resolved);
+            useStore.getState().setLayoutConfig(config as Record<string, any>);
+          } catch {
+            // Layout may be mid-destruction; ignore
+          }
+        }
+      }, 300);
+    });
 
     // Handle window resize events
     const handleResize = () => {
@@ -180,6 +148,7 @@ const MainLayout: React.FC = () => {
 
     // Cleanup
     return () => {
+      clearTimeout(saveTimer);
       window.removeEventListener('resize', handleResize);
       if (layoutRef.current) {
         layoutRef.current.destroy();

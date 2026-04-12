@@ -173,23 +173,24 @@ export interface ProjectState {
     environment: {
         themePreset: string;             // Active palette preset name (e.g. "Iceberg")
         themeMode: string;               // "Dark" or "Light"
+        faceHighlightContrast: number;   // HSV value shift for face hover (0-1, default 0.20)
         palette: {
-            dark1: string;               // Structural chrome
-            dark2: string;               // Main surface background
-            content1: string;            // Recessed elements (inputs, grooves)
-            content2: string;            // Elevated surface (containers)
-            content3: string;            // Chrome detail (borders, buttons)
-            content4: string;            // Muted text (labels, comments)
-            light1: string;              // Secondary foreground
-            light2: string;              // Primary foreground
-            accentRed: string;           // Gizmo X, G-code G, error
-            accentGreen: string;         // Gizmo Y, G-code M
-            accentBlue: string;          // Gizmo Z, G-code parameter
-            accentCyan: string;          // Model vertices
-            accentOrange: string;        // Warnings
-            accentIndigo: string;        // Focus / primary accent
-            accentSurface: string;       // 3D model material
-            accentHighlight: string;     // Scene hover highlight
+            dark1: string;
+            dark2: string;
+            content1: string;
+            content2: string;
+            content3: string;
+            content4: string;
+            light1: string;
+            light2: string;
+            accent1: string;
+            accent2: string;
+            accent3: string;
+            accent4: string;
+            accent5: string;
+            accent6: string;
+            accent7: string;
+            accent8: string;
         };
         colors: {
             sceneBackground: string;     // 3D viewport background
@@ -259,6 +260,14 @@ export interface ProjectState {
             monitorForeground: string;
         };
     };
+
+    /**
+     * LAYOUT: Golden Layout window arrangement.
+     * Stores the serialized LayoutConfig so the user's panel arrangement
+     * (tab order, splitter positions, stacks) persists across sessions.
+     * null means "use the application default layout".
+     */
+    layout: Record<string, any> | null;
 
     /**
      * GCODE: Final Machine Instructions.
@@ -371,97 +380,173 @@ export const initialProjectState: ProjectState = {
         }
     },
     environment: {
-        themePreset: 'Iceberg',
+        themePreset: 'Default',
         themeMode: 'Dark',
+        faceHighlightContrast: 0.20,
         palette: {
-            dark1: '#000000ff',
-            dark2: '#16161dff',
-            content1: '#101218ff',
-            content2: '#1f2130ff',
-            content3: '#333333ff',
-            content4: '#6c7089ff',
-            light1: '#c5c6cdff',
+            dark1: '#111111ff',
+            dark2: '#1e1e1eff',
+            content1: '#333333ff',
+            content2: '#4c4c4cff',
+            content3: '#b2b2b2ff',
+            content4: '#ccccccff',
+            light1: '#e0e0e0ff',
             light2: '#ffffffff',
-            accentRed: '#f73c3cff',
-            accentGreen: '#6ccb26ff',
-            accentBlue: '#178cf0ff',
-            accentCyan: '#00ffffff',
-            accentOrange: '#ffb86cff',
-            accentIndigo: '#354be3ff',
-            accentSurface: '#f5f5f5ff',
-            accentHighlight: '#ff0000ff',
+            accent1: '#f73c3cff',
+            accent2: '#ff9d00ff',
+            accent3: '#e6e600ff',
+            accent4: '#6ccb26ff',
+            accent5: '#6cebffff',
+            accent6: '#178cf0ff',
+            accent7: '#5b6ef5ff',
+            accent8: '#c549c9ff',
         },
         colors: {
-            sceneBackground: '#16161dff',
-            sceneFog: '#16161dff',
-            groundPlane: '#080808ff',
-            gridLines: '#ccccccff',
-            modelMaterial: '#f5f5f5ff',
-            modelEdges: '#ffffffff',
-            modelVertices: '#00ffffff',
-            tessellationLines: '#444444ff',
-            faceHighlight: '#ff0000ff',
-            edgeHighlight: '#ff0000ff',
-            vertexHighlight: '#ff0000ff',
+            sceneBackground: '#1e1e1eff',
+            sceneFog: '#1e1e1eff',
+            groundPlane: '#111111ff',
+            gridLines: '#e0e0e0ff',
+            modelMaterial: '#ffffffff',
+            modelEdges: '#111111ff',
+            modelVertices: '#111111ff',
+            tessellationLines: '#b2b2b2ff',
+            faceHighlight: '#ccccccff',
+            edgeHighlight: '#ffffffff',
+            vertexHighlight: '#ffffffff',
             hemisphereSky: '#ffffffff',
-            hemisphereGround: '#444444ff',
-            directionalLight: '#bbbbbbff',
+            hemisphereGround: '#b2b2b2ff',
+            directionalLight: '#e0e0e0ff',
             gizmoX: '#f73c3cff',
             gizmoY: '#6ccb26ff',
             gizmoZ: '#178cf0ff',
-            consoleBackground: '#16161aff',
-            consoleText: '#f8f8f2ff',
-            consoleError: '#ff5555ff',
-            consoleWarning: '#ffb86cff',
-            gcodeBackground: '#161722ff',
-            gcodeComment: '#c5c6cdff',
+            consoleBackground: '#1e1e1eff',
+            consoleText: '#e0e0e0ff',
+            consoleError: '#f73c3cff',
+            consoleWarning: '#6cebffff',
+            gcodeBackground: '#1e1e1eff',
+            gcodeComment: '#e0e0e0ff',
             gcodeG: '#f73c3cff',
-            gcodeM: '#6ccb26ff',
-            gcodeParameter: '#178cf0ff',
-            gcodeLineHighlight: '#1f2130ff',
-            topBarBackground: '#000000ff',
-            topBarBorder: '#333333ff',
-            topBarButtonBg: '#333333ff',
-            topBarButtonBorder: '#555555ff',
+            gcodeM: '#ff9d00ff',
+            gcodeParameter: '#e6e600ff',
+            gcodeLineHighlight: '#4c4c4cff',
+            topBarBackground: '#111111ff',
+            topBarBorder: '#b2b2b2ff',
+            topBarButtonBg: '#b2b2b2ff',
+            topBarButtonBorder: '#b2b2b2ff',
             topBarText: '#ffffffff',
-            glBackground: '#000000ff',
-            glContentBackground: '#222222ff',
+            glBackground: '#111111ff',
+            glContentBackground: '#4c4c4cff',
             glTabBackground: '#111111ff',
-            glTabText: '#999999ff',
-            glTabActiveText: '#ddddddff',
-            glTabFocusAccent: '#354be3ff',
-            glSplitterHover: '#444444ff',
-            glWindowBg: '#16161dff',
-            simBackground: '#16171fff',
-            simText: '#f8f8f2ff',
+            glTabText: '#ccccccff',
+            glTabActiveText: '#e0e0e0ff',
+            glTabFocusAccent: '#178cf0ff',
+            glSplitterHover: '#b2b2b2ff',
+            glWindowBg: '#1e1e1eff',
+            simBackground: '#1e1e1eff',
+            simText: '#e0e0e0ff',
         },
         tweakpane: {
-            baseBackground: '#16171fff',
-            baseShadow: '#00000033',
-            buttonBackground: '#c5c6cdff',
-            buttonBackgroundActive: '#f0f1f4ff',
-            buttonBackgroundFocus: '#e2e3e8ff',
-            buttonBackgroundHover: '#d3d5dbff',
-            buttonForeground: '#16171fff',
-            containerBackground: '#1f2336ff',
-            containerBackgroundActive: '#3c4264ff',
-            containerBackgroundFocus: '#32374fff',
-            containerBackgroundHover: '#282d44ff',
-            containerForeground: '#c5c6cdff',
-            grooveForeground: '#101218ff',
-            inputBackground: '#101218ff',
-            inputBackgroundActive: '#2a3050ff',
-            inputBackgroundFocus: '#21263eff',
-            inputBackgroundHover: '#1b1d28ff',
-            inputForeground: '#c5c6cdff',
-            labelForeground: '#6c7089ff',
-            monitorBackground: '#101218ff',
-            monitorForeground: '#6c7089ff',
+            baseBackground: '#1e1e1eff',
+            baseShadow: '#11111133',
+            buttonBackground: '#e0e0e0ff',
+            buttonBackgroundHover: '#e5e5e5ff',
+            buttonBackgroundFocus: '#e9e9e9ff',
+            buttonBackgroundActive: '#eeeeeeff',
+            buttonForeground: '#1e1e1eff',
+            containerBackground: '#4c4c4cff',
+            containerBackgroundHover: '#666666ff',
+            containerBackgroundFocus: '#7f7f7fff',
+            containerBackgroundActive: '#999999ff',
+            containerForeground: '#e0e0e0ff',
+            grooveForeground: '#333333ff',
+            inputBackground: '#333333ff',
+            inputBackgroundHover: '#393939ff',
+            inputBackgroundFocus: '#404040ff',
+            inputBackgroundActive: '#464646ff',
+            inputForeground: '#e0e0e0ff',
+            labelForeground: '#ccccccff',
+            monitorBackground: '#333333ff',
+            monitorForeground: '#ccccccff',
         }
     },
+    layout: {
+        root: {
+            type: 'row',
+            content: [
+                {
+                    type: 'stack',
+                    content: [
+                        { type: 'component', size: '1fr', id: '', maximised: false, isClosable: true, reorderEnabled: true, title: 'Config', componentType: 'config-window', componentState: { label: 'Config' } }
+                    ],
+                    size: '20%', id: '', maximised: false, isClosable: true, activeItemIndex: 0
+                },
+                {
+                    type: 'column',
+                    content: [
+                        {
+                            type: 'stack',
+                            content: [
+                                { type: 'component', size: '50%', id: '', maximised: false, isClosable: true, reorderEnabled: true, title: 'Scene', componentType: 'scene-window', componentState: {} },
+                                { type: 'component', size: '1fr', id: '', maximised: false, isClosable: true, reorderEnabled: true, title: 'Environment', componentType: 'environment-window', componentState: { label: 'Environment' } }
+                            ],
+                            size: '75%', id: '', maximised: false, isClosable: true, activeItemIndex: 0
+                        },
+                        {
+                            type: 'stack',
+                            content: [
+                                { type: 'component', size: '1fr', id: '', maximised: false, isClosable: true, reorderEnabled: true, title: 'Console', componentType: 'console-window', componentState: { label: 'Console' } }
+                            ],
+                            size: '25%', id: '', maximised: false, isClosable: true, activeItemIndex: 0
+                        }
+                    ],
+                    size: '60%', id: '', isClosable: true
+                },
+                {
+                    type: 'stack',
+                    content: [
+                        { type: 'component', size: '1fr', id: '', maximised: false, isClosable: true, reorderEnabled: true, title: 'G-Code', componentType: 'gcode-window', componentState: { label: 'G-Code' } },
+                        { type: 'component', size: '1fr', id: '', maximised: false, isClosable: true, reorderEnabled: true, title: 'Simulation', componentType: 'simulation-window', componentState: { label: 'Simulation' } }
+                    ],
+                    size: '20%', id: '', maximised: false, isClosable: true, activeItemIndex: 0
+                }
+            ],
+            size: '1fr', id: '', isClosable: true
+        },
+        openPopouts: [],
+        settings: { constrainDragToContainer: true, reorderEnabled: true, popoutWholeStack: false, blockedPopoutsThrowError: true, closePopoutsOnUnload: true, responsiveMode: 'none', tabOverlapAllowance: 0, reorderOnTabMenuClick: true, tabControlOffset: 10, popInOnClose: false },
+        dimensions: { borderWidth: 5, borderGrabWidth: 5, defaultMinItemHeight: '0px', defaultMinItemWidth: '10px', headerHeight: 20, dragProxyWidth: 300, dragProxyHeight: 200 },
+        header: { show: 'top', popout: 'open in new window', dock: 'dock', close: 'close', maximise: 'maximise', minimise: 'minimise', tabDropdown: 'additional tabs' }
+    },
     gcode: {
-        text: '',
-        lineCount: 0,
+        text: `;==============================
+;  Welcome to WEDM.XYZ
+;  Version: 0.1
+;  Author: Alex Treseder
+;  License: MIT
+;==============================
+;
+; ***G-code will appear here***
+;
+; How to use:
+; 1. Import your model
+; 2. Check auto-detected
+;    orientation & origin
+; 3. Set kerf diameter
+; 4. Generate cage for
+;    wire path
+; 5. Add lead-in/lead-out
+; 6. Adjust spark settings
+; 7. Generate G-Code
+; 8. Simulate
+;
+; Or simply paste any
+; G-code to simulate
+;
+; Happy machining!
+;==============================
+;     wedm.xyz Wire EDM CAM
+;==============================`,
+        lineCount: 29,
         lastGenerated: 0,
         warnings: []
     }

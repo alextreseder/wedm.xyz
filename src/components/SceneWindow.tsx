@@ -9,6 +9,15 @@ import type { MeshResult } from '../services/occtService';
 /** Strips alpha from 8-char hex (#rrggbbaa → #rrggbb) for Three.js compatibility */
 const hex6 = (color: string) => color.length === 9 ? color.slice(0, 7) : color;
 
+/** Darken a hex color by a factor (0 = black, 1 = unchanged) for gizmo back-face */
+function darken(hex: string, factor: number): string {
+  const h = hex.replace('#', '');
+  const r = Math.round(parseInt(h.slice(0, 2), 16) * factor);
+  const g = Math.round(parseInt(h.slice(2, 4), 16) * factor);
+  const b = Math.round(parseInt(h.slice(4, 6), 16) * factor);
+  return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
+}
+
 const SceneWindow: React.FC = () => {
   // Store refs for accessing current state in closures
   // (useEffect closures capture values at mount time, so we use refs)
@@ -88,7 +97,11 @@ const SceneWindow: React.FC = () => {
 
     // Initialize Orientation Gizmo
     if (gizmoContainerRef.current) {
-        const gizmo = new OrientationGizmo(camera, { size: 100 });
+        const gx = hex6(envColors.gizmoX), gy = hex6(envColors.gizmoY), gz = hex6(envColors.gizmoZ);
+        const gizmo = new OrientationGizmo(camera, {
+          size: 100,
+          colors: { x: [gx, darken(gx, 0.6)], y: [gy, darken(gy, 0.6)], z: [gz, darken(gz, 0.6)] },
+        });
         gizmoContainerRef.current.appendChild(gizmo.getElement());
         
         gizmo.onAxisSelected = (axis) => {
@@ -124,12 +137,12 @@ const SceneWindow: React.FC = () => {
     const matcap = textureLoader.load('./textures/dullFrontLitMetal.png', () => markDirty());
 
     const matcapMaterial = new THREE.MeshMatcapMaterial({
-      color: new THREE.Color(hex6(envColors.modelMaterial)),
+      color: 0xffffff,
       matcap: matcap,
       polygonOffset: true,
       polygonOffsetFactor: 2.0,
       polygonOffsetUnits: 1.0,
-      vertexColors: true // Enable vertex colors for highlighting
+      vertexColors: true
     });
 
     // Create the ground mesh (Z-up: ground is XY plane at Z=0)
@@ -425,9 +438,10 @@ const SceneWindow: React.FC = () => {
      */
     const clearFaceHighlight = () => {
         if (highlightedFaceRef.current) {
-            const colors = highlightedFaceRef.current.object.geometry.getAttribute('color');
-            for (let i = 0; i < colors.count; i++) colors.setXYZ(i, 1, 1, 1);
-            colors.needsUpdate = true;
+            const colorAttr = highlightedFaceRef.current.object.geometry.getAttribute('color');
+            const mc = new THREE.Color(hex6(storeRef.current.environment.colors.modelMaterial));
+            for (let i = 0; i < colorAttr.count; i++) colorAttr.setXYZ(i, mc.r, mc.g, mc.b);
+            colorAttr.needsUpdate = true;
             highlightedFaceRef.current = null;
         }
     };
@@ -437,9 +451,10 @@ const SceneWindow: React.FC = () => {
      */
     const clearEdgeHighlight = () => {
         if (highlightedEdgeRef.current) {
-            const colors = highlightedEdgeRef.current.object.geometry.getAttribute('color');
-            for (let i = 0; i < colors.count; i++) colors.setXYZ(i, 1, 1, 1);
-            colors.needsUpdate = true;
+            const colorAttr = highlightedEdgeRef.current.object.geometry.getAttribute('color');
+            const ec = new THREE.Color(hex6(storeRef.current.environment.colors.modelEdges));
+            for (let i = 0; i < colorAttr.count; i++) colorAttr.setXYZ(i, ec.r, ec.g, ec.b);
+            colorAttr.needsUpdate = true;
             highlightedEdgeRef.current = null;
         }
     };
@@ -690,9 +705,11 @@ const SceneWindow: React.FC = () => {
       // Custom Attribute: Face ID
       faceGeo.setAttribute('faceId', new THREE.BufferAttribute(meshData.faces.ids, 1));
       
-      // Color Attribute (Initialized to White)
-      const faceCount = meshData.faces.positions.length / 3;
-      const faceColors = new Float32Array(faceCount * 3).fill(1); // RGB: 1,1,1
+      // Color Attribute (initialized to model material color)
+      const faceVtxCount = meshData.faces.positions.length / 3;
+      const faceColors = new Float32Array(faceVtxCount * 3);
+      const initMC = new THREE.Color(hex6(storeRef.current.environment.colors.modelMaterial));
+      for (let i = 0; i < faceVtxCount; i++) { faceColors[i*3]=initMC.r; faceColors[i*3+1]=initMC.g; faceColors[i*3+2]=initMC.b; }
       faceGeo.setAttribute('color', new THREE.BufferAttribute(faceColors, 3));
 
       const mesh = new THREE.Mesh(faceGeo, matcapMaterial);
@@ -709,13 +726,15 @@ const SceneWindow: React.FC = () => {
           edgeGeo.setAttribute('position', new THREE.BufferAttribute(meshData.edges.positions, 3));
           edgeGeo.setAttribute('edgeId', new THREE.BufferAttribute(meshData.edges.ids, 1));
           
-          // Initialize all edge colors to white
-          const edgeCount = meshData.edges.positions.length / 3;
-          const edgeColors = new Float32Array(edgeCount * 3).fill(1);
+          // Initialize edge vertex colors to edge color
+          const edgeVtxCount = meshData.edges.positions.length / 3;
+          const edgeColors = new Float32Array(edgeVtxCount * 3);
+          const initEC = new THREE.Color(hex6(storeRef.current.environment.colors.modelEdges));
+          for (let i = 0; i < edgeVtxCount; i++) { edgeColors[i*3]=initEC.r; edgeColors[i*3+1]=initEC.g; edgeColors[i*3+2]=initEC.b; }
           edgeGeo.setAttribute('color', new THREE.BufferAttribute(edgeColors, 3));
 
           const lineMat = new THREE.LineBasicMaterial({ 
-              color: hex6(storeRef.current.environment.colors.modelEdges),
+              color: 0xffffff,
               vertexColors: true,
               // Use polygonOffset to render edges slightly in front of faces
               polygonOffset: true,
@@ -862,8 +881,6 @@ const SceneWindow: React.FC = () => {
         light.groundColor.set(hex6(colors.hemisphereGround));
         light2.color.set(hex6(colors.directionalLight));
 
-        matcapMaterial.color.set(hex6(colors.modelMaterial));
-
         (groundMesh.material as THREE.MeshPhongMaterial).color.set(hex6(colors.groundPlane));
 
         if (Array.isArray(grid.material)) {
@@ -874,15 +891,49 @@ const SceneWindow: React.FC = () => {
 
         vertexSphereMaterial.color.set(hex6(colors.vertexHighlight));
 
+        const mc = new THREE.Color(hex6(colors.modelMaterial));
+        const ec = new THREE.Color(hex6(colors.modelEdges));
+        const fhc = new THREE.Color(hex6(colors.faceHighlight));
+        const ehc = new THREE.Color(hex6(colors.edgeHighlight));
+
         mainObject.traverse((child) => {
-          if (child.name === 'brepEdges' && child instanceof THREE.LineSegments) {
-            (child.material as THREE.LineBasicMaterial).color.set(hex6(colors.modelEdges));
+          if (child.name === 'brepFaces' && child instanceof THREE.Mesh) {
+            const ca = child.geometry.getAttribute('color');
+            if (ca) {
+              for (let i = 0; i < ca.count; i++) ca.setXYZ(i, mc.r, mc.g, mc.b);
+              if (highlightedFaceRef.current && highlightedFaceRef.current.object === child) {
+                const fids = child.geometry.getAttribute('faceId');
+                const fid = highlightedFaceRef.current.index;
+                for (let i = 0; i < fids.count; i++) {
+                  if (fids.getX(i) === fid) ca.setXYZ(i, fhc.r, fhc.g, fhc.b);
+                }
+              }
+              ca.needsUpdate = true;
+            }
+          } else if (child.name === 'brepEdges' && child instanceof THREE.LineSegments) {
+            const ca = child.geometry.getAttribute('color');
+            if (ca) {
+              for (let i = 0; i < ca.count; i++) ca.setXYZ(i, ec.r, ec.g, ec.b);
+              if (highlightedEdgeRef.current && highlightedEdgeRef.current.object === child) {
+                const eids = child.geometry.getAttribute('edgeId');
+                const eid = highlightedEdgeRef.current.index;
+                for (let i = 0; i < eids.count; i++) {
+                  if (eids.getX(i) === eid) ca.setXYZ(i, ehc.r, ehc.g, ehc.b);
+                }
+              }
+              ca.needsUpdate = true;
+            }
           } else if (child.name === 'brepVertices' && child instanceof THREE.Points) {
             (child.material as THREE.PointsMaterial).color.set(hex6(colors.modelVertices));
           } else if (child.name === 'tessellation' && child instanceof THREE.LineSegments) {
             (child.material as THREE.LineBasicMaterial).color.set(hex6(colors.tessellationLines));
           }
         });
+
+        if (gizmoRef.current) {
+          const gx = hex6(colors.gizmoX), gy = hex6(colors.gizmoY), gz = hex6(colors.gizmoZ);
+          gizmoRef.current.setColors([gx, darken(gx, 0.6)], [gy, darken(gy, 0.6)], [gz, darken(gz, 0.6)]);
+        }
 
         markDirty();
       },

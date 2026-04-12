@@ -235,65 +235,54 @@ const ConfigWindow: React.FC = () => {
     // --- Oscilloscopes (Graphs) Folder ---
     const scopeFolder = sparkPage.addFolder({ title: 'Oscilloscopes', expanded: true });
 
-    const scopeState = {
-        voltage: 0,
-        current: 0,
-        index: 0
-    };
+    const WAVEFORM_POINTS = 64;
+    const scopeState = { voltage: 0, current: 0 };
 
-    // Using a faster interval for the graph binding to make it look like a scope
     const voltageGraph = scopeFolder.addBinding(scopeState, 'voltage', {
         readonly: true,
         view: 'graph',
-        min: -10, max: 250, // Adjusted for peak voltage range
+        min: -10, max: 250,
         label: 'Voltage',
-        interval: 20, // Faster update
+        bufferSize: WAVEFORM_POINTS,
+        interval: 1e10,
     });
 
     const currentGraph = scopeFolder.addBinding(scopeState, 'current', {
         readonly: true,
         view: 'graph',
-        min: -1, max: 60, // Adjusted for peak current range
+        min: -1, max: 60,
         label: 'Current',
-        interval: 20,
+        bufferSize: WAVEFORM_POINTS,
+        interval: 1e10,
     });
 
-    // Simulation Loop
-    const SIM_LENGTH = 50;
-    
-    const simulateScope = () => {
-        if (!paneRef.current) return;
+    const renderWaveform = () => {
+        const spark = useStore.getState().params.spark;
+        const totalTime = spark.pulseOnTime + spark.pulseOffTime;
+        const onFraction = totalTime > 0 ? spark.pulseOnTime / totalTime : 0.5;
+        const onSteps = Math.floor(onFraction * WAVEFORM_POINTS);
 
-        // Use current store values for simulation
-        const currentSpark = useStore.getState().params.spark;
+        for (let i = 0; i < WAVEFORM_POINTS; i++) {
+            if (i === 0) scopeState.voltage = 0;
+            else if (i === 1) scopeState.voltage = spark.peakVoltage;
+            else if (i < onSteps) scopeState.voltage = spark.servoVoltage;
+            else scopeState.voltage = 0;
 
-        // Calculate current "time" in the pulse cycle based on index (0-49)
-        const totalTime = currentSpark.pulseOnTime + currentSpark.pulseOffTime;
-        const onFraction = totalTime > 0 ? currentSpark.pulseOnTime / totalTime : 0.5;
-        const onSteps = Math.floor(onFraction * SIM_LENGTH);
-        
-        const i = scopeState.index;
-        
-        // Voltage Logic
-        if (i === 0) scopeState.voltage = 0;
-        else if (i === 1) scopeState.voltage = currentSpark.peakVoltage;
-        else if (i < onSteps) scopeState.voltage = currentSpark.servoVoltage;
-        else scopeState.voltage = 0;
-        
-        // Current Logic
-        if (i < 2) scopeState.current = 0;
-        else if (i < onSteps) scopeState.current = currentSpark.peakCurrent;
-        else scopeState.current = 0;
-        
-        // Refresh graphs
-        voltageGraph.refresh();
-        currentGraph.refresh();
-        
-        // Increment index
-        scopeState.index = (scopeState.index + 1) % SIM_LENGTH;
+            if (i < 2) scopeState.current = 0;
+            else if (i < onSteps) scopeState.current = spark.peakCurrent;
+            else scopeState.current = 0;
+
+            voltageGraph.refresh();
+            currentGraph.refresh();
+        }
     };
 
-    const simInterval = setInterval(simulateScope, 20); 
+    renderWaveform();
+
+    const unsubSpark = useStore.subscribe(
+        (state) => state.params.spark,
+        () => renderWaveform()
+    );
 
     // --- Graphics Tab ---
     const graphicsPage = tab.pages[2];
@@ -380,7 +369,7 @@ const ConfigWindow: React.FC = () => {
         .on('change', (ev: any) => useStore.getState().setDrillParam('peck', ev.value));
 
     return () => {
-      clearInterval(simInterval);
+      unsubSpark();
       if (paneRef.current) {
         paneRef.current.dispose();
         paneRef.current = null;
